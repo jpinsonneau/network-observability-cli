@@ -1,13 +1,9 @@
 package cmd
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/textproto"
 	"os"
-	"os/exec"
 	"regexp"
 	"slices"
 	"sort"
@@ -17,6 +13,9 @@ import (
 
 	"github.com/eiannone/keyboard"
 	"github.com/netobserv/flowlogs-pipeline/pkg/config"
+	"github.com/netobserv/flowlogs-pipeline/pkg/pipeline/utils"
+	"github.com/netobserv/flowlogs-pipeline/pkg/pipeline/write/grpc"
+	"github.com/netobserv/flowlogs-pipeline/pkg/pipeline/write/grpc/genericmap"
 	"github.com/rodaine/table"
 	"github.com/spf13/cobra"
 
@@ -54,34 +53,21 @@ func runFlowCapture(cmd *cobra.Command, args []string) {
 	go scanner()
 
 	wg := sync.WaitGroup{}
-	wg.Add(len(addresses))
-	for i := range addresses {
+	wg.Add(len(ports))
+	for i := range ports {
 		go func(idx int) {
 			defer wg.Done()
-			runFlowCaptureOnAddr(addresses[idx], nodes[idx])
+			runFlowCaptureOnAddr(ports[idx], nodes[idx])
 		}(i)
 	}
 	wg.Wait()
 }
 
-func runFlowCaptureOnAddr(addr string, filename string) {
+func runFlowCaptureOnAddr(port int, filename string) {
 	log.Infof("Starting Flow Capture for %s...", filename)
 
-	tcpServer, err := net.ResolveTCPAddr("tcp", addr)
-
-	if err != nil {
-		log.Error("ResolveTCPAddr failed:", err.Error())
-		log.Fatal(err)
-	}
-	conn, err := net.DialTCP("tcp", nil, tcpServer)
-	if err != nil {
-		log.Error("Dial failed:", err.Error())
-		log.Fatal(err)
-	}
-	reader := bufio.NewReader(conn)
-	tp := textproto.NewReader(reader)
 	var f *os.File
-	err = os.MkdirAll("./output/flow/", 0700)
+	err := os.MkdirAll("./output/flow/", 0700)
 	if err != nil {
 		log.Errorf("Create directory failed: %v", err.Error())
 		log.Fatal(err)
@@ -91,20 +77,21 @@ func runFlowCaptureOnAddr(addr string, filename string) {
 		log.Errorf("Create file %s failed: %v", filename, err.Error())
 		log.Fatal(err)
 	}
-	defer CleanupCapture(conn, f)
-	for {
-		// read one line (ended with \n or \r\n)
-		line, err := tp.ReadLineBytes()
-		if err != nil {
-			log.Error("Read line failed:", err.Error())
-		} else {
-			// append new line between each record to read file easilly
-			_, err = f.Write(append(line, []byte("\n")...))
-			if err != nil {
-				log.Fatal(err)
-			}
-			go manageFlowsDisplay(line)
-		}
+	defer f.Close()
+
+	flowPackets := make(chan *genericmap.Flow, 100)
+	collector, err := grpc.StartCollector(port, flowPackets)
+	if err != nil {
+		log.Error("StartCollector failed:", err.Error())
+		log.Fatal(err)
+	}
+	go func() {
+		<-utils.ExitChannel()
+		close(flowPackets)
+		collector.Close()
+	}()
+	for fp := range flowPackets {
+		go manageFlowsDisplay(fp.GenericMap.Value)
 	}
 }
 
@@ -180,12 +167,7 @@ func updateTable() {
 		lastRefresh = now
 
 		// clear terminal to render table properly
-		c := exec.Command("clear")
-		c.Stdout = os.Stdout
-		err := c.Run()
-		if err != nil {
-			log.Fatal(err)
-		}
+		fmt.Printf("\x1bc")
 
 		fmt.Print("Running network-observability-cli as Flow Capture\n")
 		fmt.Printf("Log level: %s\n", logLevel)

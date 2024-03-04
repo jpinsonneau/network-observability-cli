@@ -33,31 +33,9 @@ function setup {
   echo "creating $filename agents"
   oc apply -f ${BASH_SOURCE%/*}/current/agent.yml
   oc rollout status daemonset netobserv-cli -n netobserv-cli --timeout 60s
-
-  echo "forwarding agents ports"
-  pods=$(oc get pods -n netobserv-cli -l app=netobserv-cli -o name)
-  port=9900
-  nodes=""
-  ports=""
-  for pod in $pods
-  do 
-    echo "forwarding $pod:9999 to local port $port"
-    pkill --oldest --full "$port:9999"
-    oc port-forward $pod $port:9999 -n netobserv-cli & # run in background
-    node=$(oc get $pod -n netobserv-cli -o jsonpath='{.spec.nodeName}')
-    if [ -z "$ports" ]
-    then
-      nodes="$node"
-      ports="$port"
-    else
-      nodes="$nodes,$node"
-      ports="$ports,$port"
-    fi
-    port=$((port+1))
-  done
-
-  # TODO: find a better way to ensure port forward are running
-  sleep 2
+  
+  echo "creating $filename collector service"
+  oc apply -f ${BASH_SOURCE%/*}/collector-service.yml
 }
 
 function cleanup {
