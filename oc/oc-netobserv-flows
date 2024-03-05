@@ -1,5 +1,5 @@
 #!/bin/bash
-source "${BASH_SOURCE%/*}/network-observability-cli-resources/functions.sh"
+source "./scripts/functions.sh"
 
 # interface filter such as 'br-ex'
 filter=$1
@@ -9,14 +9,25 @@ then
   filter=""
 fi
 
+copyOutput="true"
 trap cleanup EXIT
 
 setup flows $filter
 
 echo "\nRunning network-observability-cli get-flows... "
-oc run -i --tty --image=quay.io/jpinsonn/network-observability-cli:dev \
-  --image-pull-policy='Always' \
+oc run \
   -n netobserv-cli \
   collector \
-  get-flows
-  # --nodes $nodes --ports $ports ${filter:+"--filter" "$filter"} \
+  --image=quay.io/jpinsonn/network-observability-cli:dev \
+  --image-pull-policy='Always' \
+  --restart='Never' \
+  --command -- sleep infinity
+
+oc wait \
+  -n netobserv-cli \
+  --for=condition=Ready pod/collector
+
+oc exec -i --tty \
+  -n netobserv-cli \
+  collector \
+  -- /network-observability-cli get-flows ${filter:+"--filter" "$filter"}

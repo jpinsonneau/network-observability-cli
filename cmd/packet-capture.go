@@ -1,9 +1,10 @@
 package cmd
 
 import (
+	"fmt"
 	"net"
 	"os"
-	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,7 +45,12 @@ func runPacketCapture(cmd *cobra.Command, args []string) {
 }
 
 func runPacketCaptureOnAddr(addr string, filename string) {
-	log.Infof("Starting Packet Capture for %s...", filename)
+	if len(filename) > 0 {
+		log.Infof("Starting Packet Capture for %s...", filename)
+	} else {
+		log.Infof("Starting Packet Capture...")
+		filename = strings.Replace(time.Now().UTC().Format(time.RFC3339), ":", "", -1) // get rid of offensive colons
+	}
 
 	tcpServer, err := net.ResolveTCPAddr("tcp", addr)
 
@@ -109,12 +115,9 @@ func managePcapTable(result PcapResult) {
 		lastRefresh = now
 
 		// clear terminal to render table properly
-		c := exec.Command("clear")
-		c.Stdout = os.Stdout
-		err := c.Run()
-		if err != nil {
-			log.Fatal(err)
-		}
+		fmt.Print("\x1bc")
+		// no wrap
+		fmt.Print("\033[?7l")
 
 		log.Infof("Running network-observability-cli as Packet Capture\nLog level: %s\nFilters: %s\n", logLevel, filter)
 

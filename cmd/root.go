@@ -48,7 +48,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 	rootCmd.PersistentFlags().StringVarP(&logLevel, "loglevel", "l", "info", "Log level")
 	rootCmd.PersistentFlags().StringVarP(&host, "host", "", "localhost", "Agent IP")
-	rootCmd.PersistentFlags().StringSliceVarP(&nodes, "nodes", "", []string{"node"}, "node names to monitor")
+	rootCmd.PersistentFlags().StringSliceVarP(&nodes, "nodes", "", []string{""}, "node names to monitor")
 	rootCmd.PersistentFlags().IntSliceVarP(&ports, "ports", "", []int{9999}, "TCP ports to listen")
 	rootCmd.PersistentFlags().StringVarP(&filter, "filter", "", "", "Filter")
 

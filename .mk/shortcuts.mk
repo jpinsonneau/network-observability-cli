@@ -1,7 +1,7 @@
 ##@ shortcuts helpers
 
 .PHONY: build
-build: prereqs fmt lint vendors build ## Test and Build cli
+build: prereqs fmt lint vendors compile ## Test and Build cli
 
 .PHONY: build-image
 build-image: image-build ## Build MULTIARCH_TARGETS images

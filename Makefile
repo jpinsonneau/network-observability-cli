@@ -64,6 +64,7 @@ endef
 .PHONY: prepare
 prepare:
 	@mkdir -p $(DIST_DIR)
+	mkdir -p tmp
 
 .PHONY: vendors
 vendors: ## Check go vendors
@@ -97,9 +98,9 @@ clean:
 	@rm -rf $(DIST_DIR)
 
 .PHONY: oc-commands
-oc-commands: build
-	cp -a ./oc/. ./$(DIST_DIR)
-	cp -a ./res/. ./$(DIST_DIR)/network-observability-cli-resources
+oc-commands: build ## Generate oc plugins and add them to /usr/bin/
+	@echo "### Generating oc-commands"
+	./scripts/inject.sh $(DIST_DIR)
 	sudo cp -a ./build/. /usr/bin/
 
 ##@ Images

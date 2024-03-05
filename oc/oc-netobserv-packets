@@ -1,5 +1,5 @@
 #!/bin/bash
-source "${BASH_SOURCE%/*}/network-observability-cli-resources/functions.sh"
+source "./scripts/functions.sh"
 
 # pcap filter such as 'tcp,80'
 filter=$1
@@ -10,6 +10,7 @@ then
   exit 1
 fi
 
+resetTerminal="true"
 trap cleanup EXIT
 
 setup packets $filter

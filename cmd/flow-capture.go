@@ -30,7 +30,7 @@ var flowCmd = &cobra.Command{
 }
 
 var (
-	flowsToShow = 40
+	flowsToShow = 35
 	regexes     = []string{}
 	lastFlows   = []config.GenericMap{}
 
@@ -64,7 +64,12 @@ func runFlowCapture(cmd *cobra.Command, args []string) {
 }
 
 func runFlowCaptureOnAddr(port int, filename string) {
-	log.Infof("Starting Flow Capture for %s...", filename)
+	if len(filename) > 0 {
+		log.Infof("Starting Flow Capture for %s...", filename)
+	} else {
+		log.Infof("Starting Flow Capture...")
+		filename = strings.Replace(time.Now().UTC().Format(time.RFC3339), ":", "", -1) // get rid of offensive colons
+	}
 
 	var f *os.File
 	err := os.MkdirAll("./output/flow/", 0700)
@@ -92,6 +97,11 @@ func runFlowCaptureOnAddr(port int, filename string) {
 	}()
 	for fp := range flowPackets {
 		go manageFlowsDisplay(fp.GenericMap.Value)
+		// append new line between each record to read file easilly
+		_, err = f.Write(append(fp.GenericMap.Value, []byte("\n")...))
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 
@@ -167,7 +177,9 @@ func updateTable() {
 		lastRefresh = now
 
 		// clear terminal to render table properly
-		fmt.Printf("\x1bc")
+		fmt.Print("\x1bc")
+		// no wrap
+		fmt.Print("\033[?7l")
 
 		fmt.Print("Running network-observability-cli as Flow Capture\n")
 		fmt.Printf("Log level: %s\n", logLevel)
