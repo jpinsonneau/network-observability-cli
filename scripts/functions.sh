@@ -60,60 +60,26 @@ function setup {
   echo "creating service account"
   echo "$saYAML" | oc apply -f -
 
+  echo "creating collector service"
+  echo "$collectorServiceYAML" | oc apply -f -
+
   if [ $1 = "flows" ]; then
     echo "creating flow-capture agents"
     echo "${flowAgentYAML/"{{FLOW_FILTER_VALUE}}"/$2}" | oc apply -f -
     oc rollout status daemonset netobserv-cli -n netobserv-cli --timeout 60s
-
-    echo "creating collector service"
-    echo "$collectorServiceYAML" | oc apply -f -
   elif [ $1 = "packets" ]; then
     echo "creating packet-capture agents"
     echo "${packetAgentYAML/"{{PCA_FILTER_VALUE}}"/$2}" | oc apply -f -
     oc rollout status daemonset netobserv-cli -n netobserv-cli --timeout 60s
-
-    # TODO: remove that part once pcap moved to gRPC
-    echo "forwarding agents ports"
-    pods=$(oc get pods -n netobserv-cli -l app=netobserv-cli -o name)
-    port=9900
-    nodes=""
-    ports=""
-    for pod in $pods
-    do 
-      echo "forwarding $pod:9999 to local port $port"
-      pkill --oldest --full "$port:9999"
-      oc port-forward $pod $port:9999 -n netobserv-cli & # run in background
-      node=$(oc get $pod -n netobserv-cli -o jsonpath='{.spec.nodeName}')
-      if [ -z "$ports" ]
-      then
-        nodes="$node"
-        ports="$port"
-      else
-        nodes="$nodes,$node"
-        ports="$ports,$port"
-      fi
-      port=$((port+1))
-    done
-
-    # TODO: find a better way to ensure port forward are running
-    sleep 2
   fi
 }
 
 function cleanup {
-  # TODO: remove this condition after packet capture gRPC migration
-  if [ "$resetTerminal" = "true" ]; then
-    echo "Resetting terminal params..."
-    stty -F /dev/tty echo
-    setterm -linewrap on
-  fi
-
   if output=$(oc whoami 2>&1); then
-    if [ "$copyOutput" = "true" ]; then
-      echo "Copying collector output files..."
-      mkdir -p ./output
-      oc cp -n netobserv-cli collector:output ./output
-    fi
+    echo "Copying collector output files..."
+    mkdir -p ./output
+    oc cp -n netobserv-cli collector:output ./output
+
     printf "\nCleaning up... "
     oc delete namespace netobserv-cli
   else

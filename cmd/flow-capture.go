@@ -68,7 +68,9 @@ func runFlowCaptureOnAddr(port int, filename string) {
 		log.Infof("Starting Flow Capture for %s...", filename)
 	} else {
 		log.Infof("Starting Flow Capture...")
-		filename = strings.Replace(time.Now().UTC().Format(time.RFC3339), ":", "", -1) // get rid of offensive colons
+		filename = strings.Replace(
+			time.Now().UTC().Format(time.RFC3339),
+			":", "", -1) // get rid of offensive colons
 	}
 
 	var f *os.File
@@ -77,7 +79,7 @@ func runFlowCaptureOnAddr(port int, filename string) {
 		log.Errorf("Create directory failed: %v", err.Error())
 		log.Fatal(err)
 	}
-	f, err = os.Create("./output/flow/" + filename)
+	f, err = os.Create("./output/flow/" + filename + ".json")
 	if err != nil {
 		log.Errorf("Create file %s failed: %v", filename, err.Error())
 		log.Fatal(err)
@@ -98,7 +100,7 @@ func runFlowCaptureOnAddr(port int, filename string) {
 	for fp := range flowPackets {
 		go manageFlowsDisplay(fp.GenericMap.Value)
 		// append new line between each record to read file easilly
-		_, err = f.Write(append(fp.GenericMap.Value, []byte("\n")...))
+		_, err = f.Write(append(fp.GenericMap.Value, []byte(",\n")...))
 		if err != nil {
 			log.Fatal(err)
 		}

@@ -9,7 +9,6 @@ then
   filter=""
 fi
 
-copyOutput="true"
 trap cleanup EXIT
 
 setup flows $filter

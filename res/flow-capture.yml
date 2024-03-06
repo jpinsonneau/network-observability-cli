@@ -20,7 +20,7 @@ spec:
       containers:
       - name: netobserv-cli
         # image: quay.io/netobserv/netobserv-ebpf-agent:main
-        image: quay.io/jpinsonn/netobserv-ebpf-agent:grpc-4
+        image: quay.io/jpinsonn/netobserv-ebpf-agent:grpc
         imagePullPolicy: Always
         securityContext:
           privileged: true

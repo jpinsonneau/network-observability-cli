@@ -98,7 +98,7 @@ clean:
 	@rm -rf $(DIST_DIR)
 
 .PHONY: oc-commands
-oc-commands: build ## Generate oc plugins and add them to /usr/bin/
+oc-commands: ## Generate oc plugins and add them to /usr/bin/
 	@echo "### Generating oc-commands"
 	./scripts/inject.sh $(DIST_DIR)
 	sudo cp -a ./build/. /usr/bin/
