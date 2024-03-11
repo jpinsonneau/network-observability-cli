@@ -9,6 +9,13 @@ sed -i -e '/flowAgentYAMLContent/{r ./res/flow-capture.yml' -e 'd}' ./tmp/functi
 sed -i -e '/packetAgentYAMLContent/{r ./res/packet-capture.yml' -e 'd}' ./tmp/functions.sh
 sed -i -e '/collectorServiceYAMLContent/{r ./res/collector-service.yml' -e 'd}' ./tmp/functions.sh
 
+if [ -z "$2" ]; then
+  echo "image not provided, keeping current ones"
+else 
+  echo "updating CLI images to $2"
+  sed -i "/        image:/c\        image: $2" ./tmp/functions.sh
+fi
+
 # inject updated functions to oc commands
 sed -i -e '/source.*/{r ./tmp/functions.sh' -e 'd}' ./tmp/oc-netobserv-flows
 sed -i -e '/source.*/{r ./tmp/functions.sh' -e 'd}' ./tmp/oc-netobserv-packets

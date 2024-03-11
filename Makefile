@@ -83,6 +83,10 @@ compile:
 	@echo "### Compiling project"
 	GOARCH=${GOARCH} go build -ldflags "-X main.version=${VERSION} -X 'main.buildVersion=${BUILD_VERSION}' -X 'main.buildDate=${BUILD_DATE}'" -mod vendor -a -o $(OUTPUT)
 
+.PHONY: test
+test: ## Unit test
+	@echo "### TODO, unit tests not yet implemented"
+
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	@echo "### Formatting code"
@@ -100,7 +104,7 @@ clean:
 .PHONY: oc-commands
 oc-commands: ## Generate oc plugins and add them to /usr/bin/
 	@echo "### Generating oc-commands"
-	./scripts/inject.sh $(DIST_DIR)
+	./scripts/inject.sh $(DIST_DIR) $(IMAGE)
 	sudo cp -a ./build/. /usr/bin/
 
 ##@ Images
