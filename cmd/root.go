@@ -104,8 +104,14 @@ func onInit() {
 		log.Fatalf("specified nodes names doesn't match ports length")
 	}
 
+	err := LoadConfig()
+	if err != nil {
+		log.Fatalf("can't load config from yaml: %v", err)
+	}
+
 	printBanner()
 	log.Infof("Log level: %s\nOption(s): %s", logLevel, options)
+
 	showKernelVersion()
 
 	if useMocks {
