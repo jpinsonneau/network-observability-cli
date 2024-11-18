@@ -128,6 +128,7 @@ function namespaceFound() {
 FLOWS_MANIFEST_FILE="flow-capture.yml"
 PACKETS_MANIFEST_FILE="packet-capture.yml"
 METRICS_MANIFEST_FILE="metric-capture.yml"
+CONFIG_JSON_TEMP="config.json"
 MANIFEST_OUTPUT_PATH="tmp"
 
 function setup {
@@ -314,6 +315,7 @@ function filters_usage {
   echo "          --icmp_code:              filter ICMP code                           (default: n/a)"
   echo "          --peer_ip:                filter peer IP                             (default: n/a)"
   echo "          --drops:                  filter flows with only dropped packets     (default: false)"
+  echo "          --regexes:                filter flows using regex                   (default: n/a)"
 }
 
 function specific_filters_usage {
@@ -414,6 +416,42 @@ function edit_manifest() {
     ;;
   "filter_pkt_drops")
     yq e --inplace ".spec.template.spec.containers[0].env[] |= select(.name==\"FILTER_DROPS\").value|=\"$2\"" "$3"
+    ;;
+  "filter_regexes")
+    # get current config and save it to temp file
+    jsonContent=$( yq e '.spec.template.spec.containers[0].env[] | select(.name=="FLP_CONFIG").value' "$3" )
+    json="${MANIFEST_OUTPUT_PATH}/${CONFIG_JSON_TEMP}"
+    echo "$jsonContent" > ${json}
+
+    # remove send step
+    yq e -oj --inplace "del(.pipeline[] | select(.name==\"send\"))" "$json"
+
+    # define rules from arg
+    rules=()
+    for regex in $(echo $2 | tr "," "\n")
+    do
+        keyValue=(${regex//"~"/ })
+        key=${keyValue[0]}
+        value=${keyValue[1]}
+        echo "key: $key value: $value"
+        rules+=("{\"type\":\"keep_entry_if_regex_match\",\"keepEntry\":{\"input\":\"$key\",\"value\":\"$value\"}}")
+    done
+    echo "rules: ${rules[@]}"
+    rules=$(echo "${rules[@]}" | sed "s/ /,/g")
+
+    # add filter param & pipeline
+    yq e -oj --inplace ".parameters += {\"name\":\"filter\",\"transform\":{\"type\":\"filter\",\"filter\":{\"rules\":[{\"type\":\"keep_entry_all_satisfied\",\"keepEntryAllSatisfied\":[$rules]}]}}}" "$json"
+    yq e -oj --inplace ".pipeline += {\"name\":\"filter\",\"follows\":\"enrich\"}" "$json"
+
+    # add send step back
+    yq e -oj --inplace ".pipeline += {\"name\":\"send\",\"follows\":\"filter\"}" "$json"
+
+    # get json as string with escaped quotes
+    jsonContent=$(cat $json)
+    jsonContent=${jsonContent//\"/\\\"}
+
+    # update FLP_CONFIG env
+    yq e --inplace ".spec.template.spec.containers[0].env[] |= select(.name==\"FLP_CONFIG\").value|=\"$jsonContent\"" "$3"
     ;;
   "log_level")
     yq e --inplace ".spec.template.spec.containers[0].env[] |= select(.name==\"LOG_LEVEL\").value|=\"$2\"" "$3"
@@ -569,6 +607,15 @@ function check_args_and_apply() {
         edit_manifest "filter_pkt_drops" "$value" "$2"
       else
         echo "invalid value for --drops"
+      fi
+      ;;
+    --regexes) # Filter using regexes
+      valueCount=$( grep -o "~" <<<"$value" | wc -l )
+      splitterCount=$( grep -o "," <<<"$value" | wc -l )
+      if [[ valueCount > 0 && $((valueCount)) == $((splitterCount + 1)) ]]; then
+        edit_manifest "filter_regexes" "$value" "$2"
+      else
+        echo "invalid value for --regexes"
       fi
       ;;
     --icmp_type) # ICMP type
