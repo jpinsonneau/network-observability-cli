@@ -161,7 +161,7 @@ function getSubnets() {
     sn["Services"]=$services
   fi
 
-  if [ "${#subnets}" -gt 0 ]; then
+  if [ "${#sn[@]}" -gt 0 ]; then
     echo "Found subnets:"
     for key in "${!sn[@]}"; do
       echo "    $key: ${sn[$key]}"
@@ -425,7 +425,7 @@ function edit_manifest() {
       declare -A subnets
       getSubnets subnets
 
-      if [ "${#subnets}" -gt 0 ]; then
+      if [ "${#subnets[@]}" -gt 0 ]; then
         copyFLPConfig "$3"
 
         # get network enrich stage

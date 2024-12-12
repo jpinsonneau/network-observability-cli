@@ -110,7 +110,7 @@ func onInit() {
 	}
 
 	printBanner()
-	log.Infof("Log level: %s\nOption(s): %s", logLevel, options)
+	log.Infof("\nLog level: %s\nOption(s): %s", logLevel, options)
 
 	showKernelVersion()
 

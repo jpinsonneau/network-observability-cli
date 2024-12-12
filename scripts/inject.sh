@@ -63,6 +63,9 @@ d
 sed -i.bak '/metricAgentYAMLContent/{r ./res/metric-capture.yml
 d
 }' ./tmp/functions.sh
+sed -i.bak '/smYAMLContent/{r ./res/service-monitor.yml
+d
+}' ./tmp/functions.sh
 sed -i.bak '/collectorServiceYAMLContent/{r ./res/collector-service.yml
 d
 }' ./tmp/functions.sh
