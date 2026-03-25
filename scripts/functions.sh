@@ -864,7 +864,12 @@ function check_args_and_apply() {
       fi
       ;;
     *interfaces) # Interfaces
-      edit_manifest "interfaces" "$value"
+      if [[ "$command" == "flows" || "$command" == "metrics" ]]; then
+        edit_manifest "interfaces" "$value"
+      else
+        echo "--interfaces is invalid option for packets"
+        exit 1
+      fi
       ;;
     *enable_pkt_drop) # Enable packet drop
       if [[ "$command" == "flows" || "$command" == "metrics" ]]; then
