@@ -58,18 +58,27 @@ maxTime="5m"
 maxBytes=50000000
 
 # skip dependencies check for help or version
-if [[ ! "$*" =~ ^(.*)help|version(.*) ]]; then
+if [[ ! "$*" =~ (help|version) ]]; then
   check_dependencies "$required_yq_version" "$supported_archs" "$required_bash_version"
 fi
 
 # detect output yaml option before running the script to avoid any apply
-if [[ "$*" =~ ^(.*)yaml=true|(yaml$)|(yaml )(.*) ]]; then
+if [[ "$*" =~ (yaml=true|yaml$|yaml[[:space:]]) ]]; then
   echo "Output YAMLs without applying..."
   outputYAML="true"
 fi
 
+contains_help() {
+  for arg in "$@"; do
+    case "$arg" in
+      *help) return 0 ;;
+    esac
+  done
+  return 1
+}
+
 case "$1" in
-*help)
+""|*help)
   help
   exit 0
   ;;
@@ -78,100 +87,68 @@ case "$1" in
   exit 0
   ;;
 *flows)
-  case "$2" in
-  *help)
-    flows_usage
+  shift
+  if contains_help "$@"; then
+    flows_usage | highlight_keywords flows $(get_help_keywords "$@")
     exit 0
-    ;;
-  *)
-    shift # remove first argument
-    options=("$@")
-    # run flows command
-    command="flows"
-    ;;
-  esac
+  fi
+  options=("$@")
+  command="flows"
   ;;
 *packets)
-  case "$2" in
-  *help)
-    packets_usage
+  shift
+  if contains_help "$@"; then
+    packets_usage | highlight_keywords packets $(get_help_keywords "$@")
     exit 0
-    ;;
-  *)
-    shift # remove first argument
-    options=("$@")
-    # run packets command
-    command="packets"
-    ;;
-  esac
+  fi
+  options=("$@")
+  command="packets"
   ;;
 *metrics)
-  case "$2" in
-  *help)
-    metrics_usage
+  shift
+  if contains_help "$@"; then
+    metrics_usage | highlight_keywords metrics $(get_help_keywords "$@")
     exit 0
-    ;;
-  *)
-    shift # remove first argument
-    options=("$@")
-    # run metrics command
-    command="metrics"
-    # override maxTime default to 1h for metrics only
-    maxTime="1h"
-    ;;
-  esac
+  fi
+  options=("$@")
+  command="metrics"
+  maxTime="1h"
   ;;
 *follow)
-  case "$2" in
-  *help)
-    follow_usage
+  shift
+  if contains_help "$@"; then
+    follow_usage | highlight_keywords follow $(get_help_keywords "$@")
     exit 0
-    ;;
-  *)
-    # run follow command
-    follow
-    exit 0
-    ;;
-  esac
+  fi
+  follow
+  exit 0
   ;;
 *stop)
-  case "$2" in
-  *help)
-    stop_usage
+  shift
+  if contains_help "$@"; then
+    stop_usage | highlight_keywords stop $(get_help_keywords "$@")
     exit 0
-    ;;
-  *)
-    # run deleteDaemonset command
-    deleteDaemonset
-    exit 0
-    ;;
-  esac
+  fi
+  deleteDaemonset
+  exit 0
   ;;
 *copy)
-  case "$2" in
-  *help)
-    copy_usage
+  shift
+  if contains_help "$@"; then
+    copy_usage | highlight_keywords copy $(get_help_keywords "$@")
     exit 0
-    ;;
-  *)
-    # run copy output command
-    copyOutput
-    exit 0
-    ;;
-  esac
+  fi
+  copyOutput
+  exit 0
   ;;
 *cleanup)
-  case "$2" in
-  *help)
-    cleanup_usage
+  shift
+  if contains_help "$@"; then
+    cleanup_usage | highlight_keywords cleanup $(get_help_keywords "$@")
     exit 0
-    ;;
-  *)
-    # run cleanup command
-    cleanup
-    exit 0
-    ;;
-  esac
+  fi
+  cleanup
+  exit 0
   ;;
 *)
   echo "Unknown command $1. Use 'netobserv help' to display options"

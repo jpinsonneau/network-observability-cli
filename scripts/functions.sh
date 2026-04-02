@@ -48,6 +48,7 @@ fi
 command=""
 options=""
 manifest=""
+nodeSelector=""
 
 OUTPUT_PATH="./output"
 YAML_OUTPUT_FILE="capture.yml"
@@ -310,8 +311,6 @@ function applyYAML() {
 }
 
 function setup() {
-  echo "Setting up... "
-
   # check for mandatory arguments
   if ! [[ $command =~ flows|packets|metrics ]]; then
     echo "invalid setup argument"
@@ -325,6 +324,27 @@ function setup() {
 
   # load yaml files
   loadYAMLs
+
+  # prepare manifest and validate options before any cluster changes
+  if [ "$command" = "flows" ]; then
+    manifest="${MANIFEST_OUTPUT_PATH}/${FLOWS_MANIFEST_FILE}"
+    echo "${flowAgentYAML}" >"${manifest}"
+    setCollectorPipelineConfig "$manifest"
+  elif [ "$command" = "packets" ]; then
+    manifest="${MANIFEST_OUTPUT_PATH}/${PACKETS_MANIFEST_FILE}"
+    echo "${packetAgentYAML}" >"${manifest}"
+    setCollectorPipelineConfig "$manifest"
+  elif [ "$command" = "metrics" ]; then
+    manifest="${MANIFEST_OUTPUT_PATH}/${METRICS_MANIFEST_FILE}"
+    echo "${metricAgentYAML}" >"${manifest}"
+    setMetricsPipelineConfig "$manifest"
+  fi
+  skipCleanup=true
+  parse_args
+  skipCleanup=false
+
+  print_versions
+  echo "Setting up... "
 
   # check cluster conditions when not outputing yaml only
   if [[ "$outputYAML" == "false" ]]; then
@@ -347,6 +367,10 @@ function setup() {
     YAML_OUTPUT_FILE="${command}_capture_${dateName}.yml"
   fi
 
+  if [[ "$outputYAML" == "false" && -n "$nodeSelector" ]]; then
+    getNodesByLabel "$nodeSelector"
+  fi
+
   # apply yamls
   echo "creating $namespace namespace"
   applyYAML "$namespaceYAML"
@@ -358,27 +382,22 @@ function setup() {
     echo "creating collector service"
     applyYAML "$collectorServiceYAML"
     echo "creating flow-capture agents"
-    manifest="${MANIFEST_OUTPUT_PATH}/${FLOWS_MANIFEST_FILE}"
-    echo "${flowAgentYAML}" >"${manifest}"
-    setCollectorPipelineConfig "$manifest"
-    check_args_and_apply
   elif [ "$command" = "packets" ]; then
     echo "creating collector service"
     applyYAML "$collectorServiceYAML"
     echo "creating packet-capture agents"
-    manifest="${MANIFEST_OUTPUT_PATH}/${PACKETS_MANIFEST_FILE}"
-    echo "${packetAgentYAML}" >"${manifest}"
-    setCollectorPipelineConfig "$manifest"
-    check_args_and_apply
   elif [ "$command" = "metrics" ]; then
     echo "creating service monitor"
     applyYAML "$smYAML"
     echo "creating metric-capture agents:"
-    manifest="${MANIFEST_OUTPUT_PATH}/${METRICS_MANIFEST_FILE}"
-    echo "${metricAgentYAML}" >"${manifest}"
-    setMetricsPipelineConfig "$manifest"
-    check_args_and_apply
   fi
+
+  yaml="$(cat "$manifest")"
+  applyYAML "$yaml"
+  if [[ "$outputYAML" == "false" ]]; then
+    waitDaemonset
+  fi
+  rm -rf "${MANIFEST_OUTPUT_PATH}"
 }
 
 function follow() {
@@ -721,9 +740,7 @@ function edit_manifest() {
   "node_selector")
     key=${2%:*}
     val=${2#*:}
-    if [[ "$outputYAML" == "false" ]]; then
-      getNodesByLabel "$key=$val"
-    fi
+    nodeSelector="$key=$val"
     "$YQ_BIN" e --inplace ".spec.template.spec.nodeSelector.\"$key\" |= \"$val\"" "$manifest"
     ;;
   "include_list")
@@ -765,7 +782,7 @@ function edit_manifest() {
 }
 
 # define key and value at script level to make them available all the time
-# these will be updated by check_args_and_apply first and overriden by defaultValue when needed
+# these will be updated by parse_args first and overriden by defaultValue when needed
 key=""
 value=""
 
@@ -819,8 +836,8 @@ function waitDaemonset(){
     exit 1
 }
 
-# Check if $options are valid
-function check_args_and_apply() {
+# Validate options and edit manifest accordingly
+function parse_args() {
   # Iterate through the command-line arguments
   for option in "${options[@]}"; do
     key="${option%%=*}"
@@ -864,7 +881,12 @@ function check_args_and_apply() {
       fi
       ;;
     *interfaces) # Interfaces
-      edit_manifest "interfaces" "$value"
+      if [[ "$command" == "flows" || "$command" == "metrics" ]]; then
+        edit_manifest "interfaces" "$value"
+      else
+        echo "--interfaces is invalid option for packets"
+        exit 1
+      fi
       ;;
     *enable_pkt_drop) # Enable packet drop
       if [[ "$command" == "flows" || "$command" == "metrics" ]]; then
@@ -1169,10 +1191,4 @@ function check_args_and_apply() {
     # always restrict generated metrics
     edit_manifest "include_list" "$includeList"
   fi
-  yaml="$(cat "$manifest")"
-  applyYAML "$yaml"
-  if [[ "$outputYAML" == "false" ]]; then
-    waitDaemonset
-  fi
-  rm -rf "${MANIFEST_OUTPUT_PATH}"
 }

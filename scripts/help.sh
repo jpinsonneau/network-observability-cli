@@ -3,6 +3,38 @@
 # metrics includeList
 includeList="namespace_flows_total,node_ingress_bytes_total,node_egress_bytes_total,workload_ingress_bytes_total"
 
+_BOLD_CYAN=$(printf '\033[1;36m')
+_RESET=$(printf '\033[0m')
+
+# Extract keywords from args for help highlighting
+# e.g. "--port=8080 --drops --help" → "--port" "--drops"
+get_help_keywords() {
+  for arg in "$@"; do
+    case "$arg" in
+      *help|or) ;;
+      --*=*) printf '%s\n' "${arg%%=*}" ;;
+      *) printf '%s\n' "$arg" ;;
+    esac
+  done
+}
+
+# Pipe help text through this to highlight keywords
+# Usage: some_usage_fn | highlight_keywords --port --drops
+highlight_keywords() {
+  if [ $# -eq 0 ]; then
+    cat
+    return
+  fi
+
+  local sed_args=()
+  for keyword in "$@"; do
+    keyword="${keyword#--}"
+    sed_args+=(-e "s|${keyword}|${_BOLD_CYAN}&${_RESET}|g")
+  done
+
+  sed "${sed_args[@]}"
+}
+
 # display main help
 function help {
   echo
@@ -22,6 +54,8 @@ function help {
   echo "  follow     Follow collector logs when running in background."
   echo "  stop       Stop collection by removing agent daemonset."
   echo "  version    Print software version."
+  echo
+  echo "Use --help with any command for more details (e.g. netobserv flows --help)"
   echo
   echo "Flow capture examples:"
   flows_examples
@@ -210,7 +244,7 @@ function metrics_usage {
 
 function follow_usage {
   echo
-  echo "NetObserv allows you to capture flows and packets asyncronously using the --background option."
+  echo "NetObserv allows you to capture flows and packets asynchronously using the --background option."
   echo "While the capture is running in background, you can connect to the collector pod to see the progression using the follow command."
   echo "Find more information at: https://github.com/netobserv/network-observability-cli/"
   echo
@@ -220,7 +254,7 @@ function follow_usage {
 
 function stop_usage {
   echo
-  echo "NetObserv allows you stop the collection and keep collector or dashboard for post analysis."
+  echo "NetObserv allows you to stop the collection and keep collector or dashboard for post analysis."
   echo "While the capture is running, use the stop command to remove the eBPF agents."
   echo "Find more information at: https://github.com/netobserv/network-observability-cli/"
   echo
@@ -230,7 +264,7 @@ function stop_usage {
 
 function copy_usage {
   echo
-  echo "NetObserv allows you copy locally the captured flows or packets from the collector pod."
+  echo "NetObserv allows you to copy locally the captured flows or packets from the collector pod."
   echo "While the collector is running, use the copy command to copy the output file(s)."
   echo "To avoid modifications during the copy, it's recommended to stop the capture"
   echo "Find more information at: https://github.com/netobserv/network-observability-cli/"

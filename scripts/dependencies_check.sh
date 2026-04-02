@@ -3,8 +3,6 @@
 set +u
 
 function check_dependencies() {
-  echo "Checking dependencies... "
-
   LOCAL_YQ="/tmp/yq"
   if [ -x "$LOCAL_YQ" ]; then
     YQ_BIN=$LOCAL_YQ
@@ -27,8 +25,6 @@ function check_dependencies() {
   if [ "$result" -eq 0 ]; then
     echo "Installing yq version $required_yq_version. Found version $current_yq_version."
     install_yq "$2"
-  else
-    echo "'yq' is up to date (version $current_yq_version)."
   fi
 
   current_bash_version="v${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}.${BASH_VERSINFO[2]}"
@@ -39,9 +35,14 @@ function check_dependencies() {
   if [ "$result" -eq 0 ]; then
     echo "Please upgrade bash to $required_bash_version or up. Found version $current_bash_version."
     exit 1
-  else
-    echo "'bash' is up to date (version $current_bash_version)."
   fi
+}
+
+function print_versions() {
+  current_yq_version=$("$YQ_BIN" --version | awk '{print $NF}')
+  current_bash_version="v${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}.${BASH_VERSINFO[2]}"
+  echo "'yq' version $current_yq_version"
+  echo "'bash' version $current_bash_version"
 }
 
 function compare_versions() {

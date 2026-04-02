@@ -5,11 +5,14 @@ package e2e
 import (
 	"os"
 	"path"
+	"regexp"
 	"testing"
 
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 )
+
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 var (
 	slog = logrus.WithField("component", "script_test")
@@ -40,6 +43,8 @@ func TestHelpCommand(t *testing.T) {
 		assert.Contains(t, output, "follow     Follow collector logs when running in background.")
 		assert.Contains(t, output, "stop       Stop collection by removing agent daemonset.")
 		assert.Contains(t, output, "version    Print software version.")
+		// ensure help to display --help hint
+		assert.Contains(t, output, "Use --help with any command for more details")
 		// ensure help to display examples
 		assert.Contains(t, output, "Flow capture examples:")
 		assert.Contains(t, output, "netobserv flows --drops")
@@ -48,6 +53,52 @@ func TestHelpCommand(t *testing.T) {
 		assert.Contains(t, output, "Packet capture examples:")
 		assert.Contains(t, output, "Capture flows in the background")
 		assert.Contains(t, output, "Capture metrics in the background")
+	})
+
+	t.Run("no argument shows help", func(t *testing.T) {
+		output, err := RunCommand(slog, "commands/oc-netobserv")
+		assert.Nil(t, err)
+		assert.NotEmpty(t, output)
+		assert.Contains(t, output, "Main commands:")
+	})
+}
+
+func TestSubcommandHelp(t *testing.T) {
+	t.Run("flows --help", func(t *testing.T) {
+		output, err := RunCommand(slog, "commands/oc-netobserv", "flows", "--help")
+		assert.Nil(t, err)
+		assert.NotEmpty(t, output)
+		plain := ansiRegex.ReplaceAllString(output, "")
+		assert.Contains(t, plain, "Syntax: netobserv flows [options]")
+		assert.Contains(t, plain, "Features:")
+		assert.Contains(t, plain, "Filters:")
+		assert.Contains(t, plain, "Options:")
+		assert.Contains(t, plain, "Examples:")
+	})
+
+	t.Run("flows --help at any position", func(t *testing.T) {
+		output, err := RunCommand(slog, "commands/oc-netobserv", "flows", "--port=8080", "--help")
+		assert.Nil(t, err)
+		assert.NotEmpty(t, output)
+		plain := ansiRegex.ReplaceAllString(output, "")
+		assert.Contains(t, plain, "Syntax: netobserv flows [options]")
+		assert.Contains(t, plain, "Filters:")
+	})
+
+	t.Run("packets --help", func(t *testing.T) {
+		output, err := RunCommand(slog, "commands/oc-netobserv", "packets", "--help")
+		assert.Nil(t, err)
+		assert.NotEmpty(t, output)
+		plain := ansiRegex.ReplaceAllString(output, "")
+		assert.Contains(t, plain, "Syntax: netobserv packets [options]")
+	})
+
+	t.Run("metrics --help", func(t *testing.T) {
+		output, err := RunCommand(slog, "commands/oc-netobserv", "metrics", "--help")
+		assert.Nil(t, err)
+		assert.NotEmpty(t, output)
+		plain := ansiRegex.ReplaceAllString(output, "")
+		assert.Contains(t, plain, "Syntax: netobserv metrics [options]")
 	})
 }
 
