@@ -203,6 +203,7 @@ github.com/netobserv/flowlogs-pipeline/pkg/utils
 # github.com/netobserv/netobserv-ebpf-agent v1.11.3-community.0.20260505134559-24f8cbea14ad
 ## explicit; go 1.25.0
 github.com/netobserv/netobserv-ebpf-agent/pkg/utils
+github.com/netobserv/netobserv-ebpf-agent/pkg/utils/networkevents
 # github.com/onsi/ginkgo/v2 v2.28.1
 ## explicit; go 1.24.0
 github.com/onsi/ginkgo/v2
@@ -240,6 +241,9 @@ github.com/onsi/gomega/matchers/support/goraph/edge
 github.com/onsi/gomega/matchers/support/goraph/node
 github.com/onsi/gomega/matchers/support/goraph/util
 github.com/onsi/gomega/types
+# github.com/ovn-org/ovn-kubernetes/go-controller v0.0.0-20250227173154-57a2590a1d16
+## explicit; go 1.22.0
+github.com/ovn-org/ovn-kubernetes/go-controller/observability-lib/model
 # github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 ## explicit
 github.com/pmezard/go-difflib/difflib
