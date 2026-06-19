@@ -52,7 +52,7 @@ endif
 
 ifneq ($(CLEAN_BUILD),)
 	BUILD_DATE := $(shell date +%Y-%m-%d\ %H:%M)
-	BUILD_SHA := $(shell git rev-parse --short HEAD)
+	BUILD_SHA := $(shell git rev-parse --short=8 HEAD)
 	LDFLAGS ?= -X 'main.buildVersion=${VERSION}-${BUILD_SHA}' -X 'main.buildDate=${BUILD_DATE}'
 endif
 
