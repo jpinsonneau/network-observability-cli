@@ -1,0 +1,1 @@
+{"source":"ktls","message":"NETOBSERV-KTLS api/items","items":[{"id":1,"sku":"ktls-gamma"},{"id":2,"sku":"ktls-delta"}],"stack":"nginx+kTLS kernel offload"}

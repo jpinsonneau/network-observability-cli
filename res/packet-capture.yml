@@ -16,13 +16,14 @@ spec:
     spec:
       serviceAccountName: netobserv-cli
       hostNetwork: true
+      hostPID: false
       dnsPolicy: ClusterFirstWithHostNet
       tolerations:
       - operator: Exists
       containers:
       - name: netobserv-cli
         image: "{{AGENT_IMAGE_URL}}"
-        imagePullPolicy: Always
+        imagePullPolicy: {{PULL_POLICY}}
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -40,6 +41,20 @@ spec:
             value: "1s"
           - name: ENABLE_PCA
             value: "true"
+          - name: ENABLE_OPENSSL_TRACKING
+            value: "false"
+          - name: TLS_PLAINTEXT_MIN_BYTES
+            value: "0"
+          - name: TLS_PLAINTEXT_PREVIEW_BYTES
+            value: "256"
+          - name: ENABLE_GOTLS_TRACKING
+            value: "false"
+          - name: GOTLS_CAPTURE_READ
+            value: "false"
+          - name: ENABLE_KTLS_TRACKING
+            value: "false"
+          - name: KTLS_CGROUP_ROOT
+            value: ""
           - name: METRICS_ENABLE
             value: "false"
           - name: LOG_LEVEL

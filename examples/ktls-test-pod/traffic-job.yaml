@@ -1,0 +1,55 @@
+# Generates steady HTTPS traffic to the kTLS test server (nginx + kernel TLS offload).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ktls-test-traffic
+  namespace: ktls-test
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: curl
+          image: docker.io/curlimages/curl:8.11.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              TARGET="${TARGET_URL:-https://ktls-test.ktls-test.svc.cluster.local:8443/}"
+              echo "Traffic to ${TARGET}"
+              i=0
+              while [ "$i" -lt 120 ]; do
+                # Match server TLS 1.2-only so nginx can negotiate kernel TLS offload.
+                curl --http1.1 --no-keepalive --tlsv1.2 --tls-max 1.2 -sk \
+                  -H 'Authorization: Bearer fake-ktls-client-token' \
+                  -H "X-Fake-Trace-Id: ktls-req-message-${i}" \
+                  -H 'X-Fake-Tenant: demo-ktls' \
+                  -H 'X-NetObserv-Client: ktls-traffic-pod' \
+                  "${TARGET}message?seq=${i}" || true
+                curl --http1.1 --no-keepalive --tlsv1.2 --tls-max 1.2 -sk \
+                  -H 'Authorization: Bearer fake-ktls-client-token' \
+                  -H "X-Fake-Trace-Id: ktls-req-items-${i}" \
+                  -H 'X-Fake-Tenant: demo-ktls' \
+                  -H 'X-NetObserv-Client: ktls-traffic-pod' \
+                  "${TARGET}api/items?seq=${i}" || true
+                curl --http1.1 --no-keepalive --tlsv1.2 --tls-max 1.2 -sk -X POST \
+                  -H 'Authorization: Bearer fake-ktls-client-token' \
+                  -H "X-Fake-Trace-Id: ktls-req-echo-${i}" \
+                  -H 'X-Fake-Tenant: demo-ktls' \
+                  -H 'X-NetObserv-Client: ktls-traffic-pod' \
+                  -H 'Content-Type: text/plain' \
+                  -d "NETOBSERV-KTLS client request seq=${i}" \
+                  "${TARGET}api/echo?seq=${i}" || true
+                i=$((i + 1))
+                sleep 1
+              done
+              echo "done"

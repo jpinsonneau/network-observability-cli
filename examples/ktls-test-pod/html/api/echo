@@ -1,0 +1,5 @@
+NETOBSERV-KTLS POST echo response
+TLS stack: nginx + OpenSSL kTLS kernel offload (sk_msg)
+Workload: ktls-test-pod
+Endpoint: POST /api/echo
+Note: static response body (kTLS sk_msg capture on nginx reply)
