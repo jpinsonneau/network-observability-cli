@@ -23,8 +23,6 @@ spec:
       securityContext:
         seccompProfile:
           type: RuntimeDefault
-        hostUsers: false
-        fsGroup: 0
       containers:
         - name: server
           image: __OPENSSL_TEST_IMAGE__

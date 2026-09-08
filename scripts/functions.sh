@@ -636,7 +636,7 @@ function edit_manifest() {
       "$YQ_BIN" e --inplace '.spec.template.spec.containers[0].volumeMounts += [{"name":"host-usr","mountPath":"/host/usr","readOnly":true},{"name":"host-lib","mountPath":"/host/lib","readOnly":true},{"name":"host-lib64","mountPath":"/host/lib64","readOnly":true}]' "$manifest"
     fi
     "$YQ_BIN" e --inplace '.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem = false' "$manifest"
-    if [[ "$("$YQ_BIN" e '(.spec.template.spec.containers[0].securityContext.capabilities.add // []) | any(. == "SYS_PTRACE")' "$manifest")" != "true" ]]; then
+    if [[ "$("$YQ_BIN" e '.spec.template.spec.containers[0].securityContext.capabilities.add[] | select(. == "SYS_PTRACE")' "$manifest")" != "SYS_PTRACE" ]]; then
       "$YQ_BIN" e --inplace '.spec.template.spec.containers[0].securityContext.capabilities.add += ["SYS_PTRACE"]' "$manifest"
     fi
     ;;
