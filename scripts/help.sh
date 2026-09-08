@@ -86,6 +86,8 @@ function packets_examples {
   echo "    netobserv packets --port=8080"
   echo "  Capture HTTPS with OpenSSL plaintext via libssl uprobes:"
   echo "    netobserv packets --port=8443 --enable_openssl --peer_ip=<pod-ip> --privileged --background"
+  echo "  Capture OpenSSL plaintext scoped by process name:"
+  echo "    netobserv packets --port=8443 --enable_openssl --tls_process_allowlist=nginx"
   echo "    # test workload: examples/openssl-test-pod/"
   echo "    # readable output: output/plaintext/<timestamp>.jsonl (PlaintextDisplay field)"
   echo "  Capture with Wireshark key log embedded in pcapng:"
@@ -137,6 +139,7 @@ function flowsAndPackets_collector_usage {
 
 function packets_tls_usage {
   echo "  --enable_openssl:             capture TLS plaintext via OpenSSL uprobes             (default: false, requires --privileged; recommended: --peer_ip --port)"
+  echo "  --tls_process_allowlist:      restrict TLS uprobes to named processes (csv)         (default: all non-infra; e.g. nginx,envoy)"
   echo "  --tls_plaintext_min_bytes:    drop TLS plaintext events shorter than N bytes         (default: 0, agent env TLS_PLAINTEXT_MIN_BYTES)"
   echo "  --tls_plaintext_preview_bytes: PlaintextPreview length (0 = full captured payload)   (default: 256)"
   echo "  --tls-keylog:                 path to SSLKEYLOGFILE for pcapng decryption           (collector flag)"

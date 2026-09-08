@@ -47,6 +47,8 @@ spec:
             value: "0"
           - name: TLS_PLAINTEXT_PREVIEW_BYTES
             value: "256"
+          - name: TLS_PLAINTEXT_PROCESS_ALLOWLIST
+            value: ""
           - name: METRICS_ENABLE
             value: "false"
           - name: LOG_LEVEL

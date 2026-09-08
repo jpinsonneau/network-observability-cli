@@ -630,6 +630,9 @@ function edit_manifest() {
   "tls_plaintext_preview_bytes")
     "$YQ_BIN" e --inplace ".spec.template.spec.containers[0].env[] |= select(.name==\"TLS_PLAINTEXT_PREVIEW_BYTES\").value|=\"$2\"" "$manifest"
     ;;
+  "tls_process_allowlist")
+    "$YQ_BIN" e --inplace ".spec.template.spec.containers[0].env[] |= select(.name==\"TLS_PLAINTEXT_PROCESS_ALLOWLIST\").value|=\"$2\"" "$manifest"
+    ;;
   "tls_host_mounts")
     if [[ "$("$YQ_BIN" e '[.spec.template.spec.volumes[] | select(.name == "host-usr")] | length' "$manifest")" == "0" ]]; then
       "$YQ_BIN" e --inplace '.spec.template.spec.volumes += [{"name":"host-usr","hostPath":{"path":"/usr","type":"Directory"}},{"name":"host-lib","hostPath":{"path":"/lib","type":"Directory"}},{"name":"host-lib64","hostPath":{"path":"/lib64","type":"Directory"}}]' "$manifest"
@@ -877,7 +880,7 @@ function option_enabled_flag() {
 function has_plaintext_pid_scope() {
   for option in "${options[@]}"; do
     case "$(option_basename "$option")" in
-    peer_ip|peer_cidr)
+    peer_ip|peer_cidr|tls_process_allowlist)
       local value="${option#*=}"
       if [[ -n "$value" && "${option%%=*}" != "$value" ]]; then
         return 0
@@ -950,6 +953,13 @@ function plaintext_peer_scope_label() {
       local value="${option#*=}"
       if [[ -n "$value" && "${option%%=*}" != "$value" ]]; then
         echo "peer_cidr=${value}"
+        return
+      fi
+      ;;
+    tls_process_allowlist)
+      local value="${option#*=}"
+      if [[ -n "$value" && "${option%%=*}" != "$value" ]]; then
+        echo "process=${value}"
         return
       fi
       ;;
@@ -1226,6 +1236,19 @@ function parse_args() {
         fi
       else
         echo "--tls_plaintext_preview_bytes is invalid option for $command"
+        exit 1
+      fi
+      ;;
+    *tls_process_allowlist) # Restrict TLS plaintext uprobes to named processes (comma-separated)
+      if [[ "$command" == "packets" ]]; then
+        if [[ -n "$value" ]]; then
+          edit_manifest "tls_process_allowlist" "$value"
+        else
+          echo "invalid value for --tls_process_allowlist (comma-separated process names required)"
+          exit 1
+        fi
+      else
+        echo "--tls_process_allowlist is invalid option for $command"
         exit 1
       fi
       ;;
