@@ -967,6 +967,35 @@ function plaintext_peer_scope_label() {
   done
 }
 
+function confirm_tls_decryption_legal() {
+  if [[ "$command" != "packets" ]]; then
+    return
+  fi
+  if ! plaintext_capture_flag_enabled enable_openssl; then
+    return
+  fi
+  echo >&2
+  echo "WARNING: TLS decryption exposes encrypted traffic in plain text. In some" >&2
+  echo "         jurisdictions, capturing others' communications may be prohibited" >&2
+  echo "         without consent. Make sure this is legally permitted before proceeding." >&2
+  echo >&2
+  # non-interactive runs (e2e) skip the prompt
+  if [[ "$isE2E" = true ]]; then
+    return
+  fi
+  while true; do
+    read -rp "Continue? [yes/no] " yn
+    case $yn in
+    [Yy]*) break ;;
+    [Nn]*)
+      echo "Capture aborted."
+      exit 1
+      ;;
+    *) echo "Please answer yes or no." ;;
+    esac
+  done
+}
+
 function warn_plaintext_peer_scope() {
   if [[ "$command" != "packets" ]]; then
     return
@@ -1408,6 +1437,7 @@ function parse_args() {
   done
 
   warn_plaintext_peer_scope
+  confirm_tls_decryption_legal
 
   # avoid packet capture without filters
   if [[ "$command" = "packets" ]]; then
