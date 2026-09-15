@@ -1,10 +1,10 @@
 # TLS Decryption Coverage Matrix
 
-Reference for NetObserv CLI on-demand packet capture with TLS plaintext visibility on OpenShift.
+Reference for NetObserv CLI on-demand packet capture with TLS plaintext visibility on Kubernetes (including OpenShift).
 
 ## Approaches
 
-| Approach | Coverage on OpenShift | Requires app changes | CLI flag | Agent env |
+| Approach | Coverage | Requires app changes | CLI flag | Agent env |
 |----------|----------------------|----------------------|----------|-----------|
 | PCA wire capture | Cleartext HTTP only | No | (default in packets mode) | `ENABLE_PCA=true` |
 | OpenSSL uprobes | Apps using libssl (nginx, curl, Python, Ruby, PHP) | No | `--enable_openssl` | `ENABLE_OPENSSL_TRACKING=true` |
@@ -14,12 +14,12 @@ Reference for NetObserv CLI on-demand packet capture with TLS plaintext visibili
 Test workloads: [openssl-test-pod](../examples/openssl-test-pod/) (`--enable_openssl`), [gotls-test-pod](../examples/gotls-test-pod/) (`--enable_gotls`), [ktls-test-pod](../examples/ktls-test-pod/) (`--enable_ktls`).
 | SSLKEYLOGFILE + pcapng DSB | Any TLS when customer sets env var | Yes | `--tls-keylog` | (none) |
 
-## OpenShift scenarios
+## Scenarios
 
 | Scenario | Wire PCAP | Recommended path |
 |----------|-----------|------------------|
 | HTTP on port 80 | Readable | PCA |
-| Route terminates TLS, pod sees HTTP | Readable | PCA |
+| Ingress/Route terminates TLS, pod sees HTTP | Readable | PCA |
 | Pod HTTPS (OpenSSL) | Encrypted | OpenSSL uprobes (`--enable_openssl`); test workload: [examples/openssl-test-pod](../examples/openssl-test-pod/) |
 | Go microservice | Encrypted | GoTLS uprobes (`--enable_gotls`) |
 | Mixed OpenSSL + Go workloads | Encrypted | Both flags together (`--enable_openssl --enable_gotls`) |
@@ -36,7 +36,7 @@ Test workloads: [openssl-test-pod](../examples/openssl-test-pod/) (`--enable_ope
 
 Plaintext JSONL fields: `RecordType`, `PacketID`, `PcapAnnotated`, `Time`, `TimeFlowStartMs`, `Pid`, `Tgid`, `Direction`, `TLSSource`, `Plaintext` (base64), `PlaintextLen`, `PlaintextPreview`, `SSLType`, and when available `SrcAddr`, `DstAddr`, `SrcPort`, `DstPort`, `Protocol`.
 
-Deploy a collector image that includes the TLS correlation code. The default `quay.io/netobserv/network-observability-cli:main` image does not yet ship this feature; build locally and set `NETOBSERV_COLLECTOR_IMAGE` before running `oc netobserv packets`.
+Deploy a collector image that includes the TLS correlation code. The default `quay.io/netobserv/network-observability-cli:main` image does not yet ship this feature; build locally and set `NETOBSERV_COLLECTOR_IMAGE` before running `netobserv packets` (`oc netobserv` / `kubectl netobserv`).
 
 `PcapAnnotated` is `true` when the CLI matched the event to a wire packet (strict 5-tuple + time). When multiple workloads share a capture port, port-only correlation is refused; use `--peer_ip` or rely on agent socket-fd 5-tuple enrichment.
 
@@ -62,7 +62,7 @@ CLI: `--tls_plaintext_min_bytes=4` (packets mode only) sets the agent env on the
 
 `PlaintextPreview` length defaults to 256 bytes. Set `--tls_plaintext_preview_bytes=0` for the full captured payload in preview (max 16 KiB per event), or another positive value to customize. The TUI also decodes the full base64 `Plaintext` field when the preview is shorter than `PlaintextLen`.
 
-## OpenShift deployment requirements
+## Deployment requirements
 
 TLS plaintext capture requires elevated privileges on the agent DaemonSet:
 
@@ -84,7 +84,7 @@ Agent mounts host `/usr`, `/lib`, `/lib64` under `/host/` when using `--enable_o
   - **`--peer_ip` / `--peer_cidr`**: scopes **which processes get uprobes** (OpenSSL libssl per container, GoTLS binary discovery, kTLS PID allowlist). Without peer scope the CLI warns; the agent hooks broader targets on the node.
   - **`--port`**: filters **exported plaintext and wire capture** to matching src/dst ports; also helps 5-tuple enrichment when addresses are partial. It does **not** reduce uprobe attachment — only narrows what you see in the TUI/JSONL/pcap.
 - Optional GoTLS overrides: `GOTLS_ELF_PATH`, `GOTLS_WRITE_OFFSET`, `GOTLS_READ_OFFSET`
-- kTLS: IPv6 supported in agent; cgroup attach required on RHEL CoreOS nodes; niche workloads only
+- kTLS: IPv6 supported in agent; cgroup attach required on some node OSes (e.g. RHEL CoreOS); niche workloads only
 - PCA wire capture truncates frames to 256 bytes; plaintext uses a separate 16 KiB ringbuf per event
 
 ## Troubleshooting empty plaintext JSONL
@@ -110,26 +110,19 @@ Optional overrides when auto-discovery fails (stripped/custom builds):
 
 Requires `hostPID: true` (set automatically with `--enable_gotls --privileged`). **Recommended:** `--peer_ip=<pod-ip>` and `--port=<service-port>`; unscoped peer discovery hooks all non-excluded Go binaries on the node.
 
-## MVP status (validated)
+## Live capture TUI behavior
 
-- OpenSSL plaintext on OpenShift console traffic (HTTPS + WebSocket JSON) via `--enable_openssl`
-- Output: pcapng + `output/plaintext/<timestamp>.jsonl`
-- TUI shows `PlaintextPreview` when a plaintext record is selected
-
-Live packet TUI behavior with plaintext capture (`--enable_openssl`, `--enable_gotls`, and/or `--enable_ktls`):
+With plaintext capture enabled (`--enable_openssl`, `--enable_gotls`, and/or `--enable_ktls`):
 
 - The table lists **TLS plaintext rows only** (wire packets stay in the pcapng); green rows are meaningful plaintext (HTTP/JSON-like payloads)
 - When multiple TLS sources are active, the table keeps the newest row per source (`openssl`, `gotls`, `ktls`) visible alongside recent events
 - **Event / Type** shows the TLS source for plaintext rows; use **PlaintextPreview** for the decoded payload
 - Pause the capture, then click a green row to open the **TLS Plaintext** text panel
 - Press Esc to resume live capture
-- P0–P3: wall-clock timestamps, PID scoping, userspace 5-tuple enrichment, deduplication, wire↔plaintext correlation (`PcapAnnotated`, pcapng comments)
 
-## Remaining work
+Plaintext records carry wall-clock timestamps, PID scoping, userspace 5-tuple enrichment, deduplication, and wire↔plaintext correlation (`PcapAnnotated`, pcapng comments).
 
-| Priority | Item | Why |
-|----------|------|-----|
-| P4 | BoringSSL / Envoy (service mesh) | Phase 5 in plan |
-| P5 | kTLS validation on OpenShift | Phase 4 in plan |
-| — | ~~eBPF 5-tuple on `ssl_data_event_t`~~ | kTLS kernel tuple + fd→inode for OpenSSL/GoTLS (done) |
-| — | K8s pod/namespace metadata on plaintext | TUI join with workload identity |
+## Not covered
+
+- BoringSSL / Envoy (service mesh mTLS, e.g. Istio / OpenShift Service Mesh)
+- K8s pod/namespace metadata on plaintext records (enrichment depends on reliable 5-tuple)
