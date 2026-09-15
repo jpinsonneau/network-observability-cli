@@ -60,6 +60,19 @@ func plaintextFieldString(m config.GenericMap) string {
 	return ""
 }
 
+// plaintextRawBytes returns captured TLS bytes for the detail panel (no JSON/HTTP peeling).
+func plaintextRawBytes(m config.GenericMap) []byte {
+	if pt := plaintextFieldString(m); pt != "" {
+		if decoded, err := base64.StdEncoding.DecodeString(pt); err == nil && len(decoded) > 0 {
+			return decoded
+		}
+	}
+	if preview, ok := m["PlaintextPreview"].(string); ok && len(preview) > 0 {
+		return []byte(preview)
+	}
+	return nil
+}
+
 func unwrapPayloadLayers(data []byte) []byte {
 	for i := 0; i < maxPlaintextUnwrapDepth; i++ {
 		next := unwrapPayloadLayer(data)
@@ -273,6 +286,43 @@ func enrichPlaintextForExport(m *config.GenericMap) {
 	}
 }
 
+// plaintextTablePreview returns a human-readable column value for any plaintext row.
+func plaintextTablePreview(m config.GenericMap, maxLen int) string {
+	if p := plaintextPreviewForDisplay(m, maxLen); p != "" {
+		return p
+	}
+	return plaintextBinarySummary(m)
+}
+
+func plaintextBinarySummary(m config.GenericMap) string {
+	src, _ := m["TLSSource"].(string)
+	if src == "" {
+		src = "tls"
+	}
+	dir, _ := m["Direction"].(string)
+	nbytes := plaintextLen(m)
+	if dir != "" {
+		return fmt.Sprintf("<%s %s %dB binary>", src, dir, nbytes)
+	}
+	return fmt.Sprintf("<%s %dB binary>", src, nbytes)
+}
+
+func plaintextLen(m config.GenericMap) int {
+	switch v := m["PlaintextLen"].(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	default:
+		if b := plaintextPayloadBytes(m); len(b) > 0 {
+			return len(b)
+		}
+	}
+	return 0
+}
+
 func extractHTTPBody(data []byte) []byte {
 	if len(data) == 0 {
 		return data
@@ -424,24 +474,6 @@ func isPacketExportObject(obj map[string]json.RawMessage) bool {
 	_, hasBytes := obj["Bytes"]
 	_, hasData := obj["Data"]
 	return hasBytes && hasData
-}
-
-func plaintextDisplayString(data []byte) string {
-	s := strings.ToValidUTF8(string(data), "\uFFFD")
-	var b strings.Builder
-	for _, r := range s {
-		switch r {
-		case '\n', '\r', '\t':
-			b.WriteRune(r)
-		default:
-			if r >= 32 && r < 127 || r > 127 {
-				b.WriteRune(r)
-			} else {
-				fmt.Fprintf(&b, "\\x%02x", r)
-			}
-		}
-	}
-	return b.String()
 }
 
 func isGarbageDisplay(s string) bool {
