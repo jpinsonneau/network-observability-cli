@@ -473,7 +473,11 @@ function cleanup() {
       copyOutput
     elif [ "$copy" = "prompt" ]; then
       while true; do
-        read -rp "Copy the capture output locally? [yes/no] " yn
+        if ! read -rp "Copy the capture output locally? [yes/no] " yn; then
+          # EOF (e.g. non-interactive stdin): skip copy rather than looping forever.
+          echo "copy skipped"
+          break
+        fi
         case $yn in
         [Yy]*)
           copyOutput
@@ -984,7 +988,11 @@ function confirm_tls_decryption_legal() {
     return
   fi
   while true; do
-    read -rp "Continue? [yes/no] " yn
+    if ! read -rp "Continue? [yes/no] " yn; then
+      # EOF (e.g. non-interactive stdin): abort rather than looping forever.
+      echo "Capture aborted."
+      exit 1
+    fi
     case $yn in
     [Yy]*) break ;;
     [Nn]*)
