@@ -88,6 +88,12 @@ func startPacketCollector() {
 	}
 	defer ngw.Flush()
 
+	// Register the writer so a SIGTERM can flush buffered packets before the
+	// process exits; without this the last buffered packet(s) are lost and the
+	// pcapng file ends with a truncated block ("unexpected EOF" on read).
+	setActivePacketWriter(ngw, f)
+	defer clearActivePacketWriter()
+
 	if tlsKeylogPath != "" {
 		if err := embedTLSKeylog(ngw, tlsKeylogPath); err != nil {
 			log.Warnf("TLS keylog embed failed: %v", err)
@@ -237,9 +243,49 @@ func writePacketData(ngw *pcapgo.NgWriter, genericMap *config.GenericMap, data *
 	commonComment.Reset()
 }
 
-// ngwMu serializes all NgWriter writes (packets and TLS keylog DSB blocks).
+// ngwMu serializes all NgWriter writes (packets and TLS keylog DSB blocks) and
+// guards the active writer references below.
 var ngwMu sync.Mutex
 var keylogOffset int64
+
+// activeNgw / activePcapFile point at the in-flight packet capture output, if
+// any, so flushActivePacketWriter can persist buffered data on abrupt exit.
+var (
+	activeNgw      *pcapgo.NgWriter
+	activePcapFile *os.File
+)
+
+func setActivePacketWriter(ngw *pcapgo.NgWriter, f *os.File) {
+	ngwMu.Lock()
+	defer ngwMu.Unlock()
+	activeNgw = ngw
+	activePcapFile = f
+}
+
+func clearActivePacketWriter() {
+	ngwMu.Lock()
+	defer ngwMu.Unlock()
+	activeNgw = nil
+	activePcapFile = nil
+}
+
+// flushActivePacketWriter flushes any buffered pcapng data to disk. It is safe
+// to call when no packet capture is running (no-op) and is used from the
+// SIGTERM handler, which exits the process without running deferred flushes.
+func flushActivePacketWriter() {
+	ngwMu.Lock()
+	defer ngwMu.Unlock()
+	if activeNgw != nil {
+		if err := activeNgw.Flush(); err != nil {
+			log.Errorf("failed to flush pcapng writer on exit: %v", err)
+		}
+	}
+	if activePcapFile != nil {
+		if err := activePcapFile.Sync(); err != nil {
+			log.Errorf("failed to sync pcapng file on exit: %v", err)
+		}
+	}
+}
 
 func embedTLSKeylog(ngw *pcapgo.NgWriter, path string) error {
 	content, err := os.ReadFile(path)

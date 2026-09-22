@@ -82,6 +82,10 @@ func init() {
 		log.Info("Received SIGTERM; cleaning up...")
 		stopReceived = true
 
+		// Persist any buffered packet capture data before exiting; os.Exit
+		// skips deferred flushes, which would otherwise truncate the pcapng.
+		flushActivePacketWriter()
+
 		os.Exit(0)
 	}()
 
