@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -11,7 +12,102 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcapgo"
 	"github.com/netobserv/flowlogs-pipeline/pkg/config"
+	"github.com/stretchr/testify/assert"
 )
+
+// The agent's source endpoint identifies the local TLS process. Exported
+// endpoints and Kubernetes metadata must instead follow the matched wire frame.
+func TestWirePacketBufferPlaintextDirection(t *testing.T) {
+	for _, direction := range []string{"read", "write"} {
+		for _, fullTuple := range []bool{false, true} {
+			for _, plaintextFirst := range []bool{false, true} {
+				name := fmt.Sprintf("%s/fullTuple=%t/plaintextFirst=%t", direction, fullTuple, plaintextFirst)
+				t.Run(name, func(t *testing.T) {
+					var output bytes.Buffer
+					ngw, err := pcapgo.NewNgWriter(&output, layers.LinkTypeEthernet)
+					assert.NoError(t, err)
+					var finalized []config.GenericMap
+					buf := newWirePacketBuffer(ngw, time.Minute, func(m config.GenericMap) {
+						finalized = append(finalized, m.Copy())
+					}, captureFilters{ports: []uint16{8443}, peerIPs: []net.IP{net.ParseIP("10.128.2.17")}})
+					t.Cleanup(buf.Close)
+					now := float64(time.Now().UnixMilli())
+					server := config.GenericMap{
+						"TimeFlowStartMs": now,
+						"SrcAddr":         "10.128.2.17", "SrcPort": "8443",
+						"DstAddr": "10.128.2.18", "DstPort": "36380",
+						"SrcK8S_Name": "openssl-test", "DstK8S_Name": "curl-driver",
+						"SrcK8S_Type": "Pod", "DstK8S_Type": "Pod",
+					}
+					client := config.GenericMap{
+						"TimeFlowStartMs": now,
+						"SrcAddr":         "10.128.2.18", "SrcPort": "36380",
+						"DstAddr": "10.128.2.17", "DstPort": "8443",
+						"SrcK8S_Name": "curl-driver", "DstK8S_Name": "openssl-test",
+						"SrcK8S_Type": "Pod", "DstK8S_Type": "Pod",
+					}
+					correct, wrong := server, client
+					if direction == "read" {
+						correct, wrong = client, server
+					}
+					pt := config.GenericMap{
+						"TimeFlowStartMs": now, "Direction": direction, "TLSSource": "openssl",
+						"SrcAddr": "10.128.2.17", "SrcPort": float64(8443),
+						"SrcK8S_Name": "openssl-test", "SrcK8S_Zone": "stale-zone",
+						"DstK8S_Name": "stale-peer", "PlaintextPreview": "HTTP/1.1 200 OK",
+					}
+					if fullTuple {
+						pt["DstAddr"], pt["DstPort"] = "10.128.2.18", float64(36380)
+					}
+					enqueue := func(m config.GenericMap) {
+						t.Helper()
+						tuple, ok := flowTupleFromMap(m)
+						assert.True(t, ok)
+						frame := buildTestTCPFrameWithTuple(t, net.ParseIP(tuple.srcIP), net.ParseIP(tuple.dstIP),
+							tuple.srcPort, tuple.dstPort, bytes.Repeat([]byte("x"), 128))
+						assert.NoError(t, buf.Enqueue(m, base64.StdEncoding.EncodeToString(frame)))
+					}
+					if plaintextFirst {
+						buf.HandlePlaintext(pt, 6)
+					}
+					enqueue(wrong)
+					assert.Empty(t, finalized, "opposite-direction packet must not consume plaintext")
+					enqueue(correct)
+					if !plaintextFirst {
+						buf.HandlePlaintext(pt, 6)
+					}
+					if !assert.Len(t, finalized, 1) {
+						t.FailNow()
+					}
+					assert.Equal(t, true, finalized[0]["PcapAnnotated"])
+					wantTuple, _ := flowTupleFromMap(correct)
+					gotTuple, ok := flowTupleFromMap(finalized[0])
+					assert.True(t, ok)
+					assert.Equal(t, wantTuple, gotTuple)
+					for _, key := range []string{"SrcK8S_Name", "DstK8S_Name", "SrcK8S_Type", "DstK8S_Type"} {
+						assert.Equal(t, correct[key], finalized[0][key], key)
+					}
+					assert.NotContains(t, finalized[0], "SrcK8S_Zone")
+
+					buf.flushAll()
+					assert.NoError(t, ngw.Flush())
+					reader, err := pcapgo.NewNgReader(bytes.NewReader(output.Bytes()), pcapgo.DefaultNgReaderOptions)
+					assert.NoError(t, err)
+					_, _, wrongOpts, err := reader.ReadPacketDataWithOptions()
+					assert.NoError(t, err)
+					assert.Nil(t, wrongOpts.PacketID)
+					_, _, correctOpts, err := reader.ReadPacketDataWithOptions()
+					assert.NoError(t, err)
+					if !assert.NotNil(t, correctOpts.PacketID) {
+						t.FailNow()
+					}
+					assert.Equal(t, uint64(6), *correctOpts.PacketID)
+					assert.Contains(t, strings.Join(correctOpts.Comments, "\n"), "5-tuple: "+plaintextFiveTupleLine(finalized[0]))
+				})
+			}
+		}
+	}
+}
 
 func TestAssignPlaintextPacketID(t *testing.T) {
 	plaintextPacketID = 0

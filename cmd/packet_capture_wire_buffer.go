@@ -355,8 +355,9 @@ func setPlaintextTuple(m *config.GenericMap, srcIP string, srcPort uint16, dstIP
 	(*m)["Proto"] = float64(6)
 }
 
-// applyWireTupleToPlaintext maps a correlated wire packet 5-tuple onto a plaintext record.
-// Read direction uses the reverse wire tuple (ingress to the pod).
+// applyWireTupleToPlaintext borrows a candidate tuple for matching, keeping the
+// local process endpoint in SrcAddr/SrcPort as in the incoming agent record.
+// Export uses overlayWireTupleToPlaintext to restore wire direction.
 func applyWireTupleToPlaintext(pt *config.GenericMap, wire config.GenericMap) {
 	if pt == nil || plaintextHasTuple(*pt) {
 		return
@@ -381,6 +382,14 @@ func overlayCorrelatedWireToPlaintext(pt *config.GenericMap, wire config.Generic
 		return
 	}
 	overlayWireTupleToPlaintext(pt, wire)
+	// Existing endpoint metadata may describe the agent's local-first tuple or
+	// an earlier candidate. Replace it together with the confirmed wire tuple,
+	// including removing fields that the matched packet does not provide.
+	for key := range *pt {
+		if strings.HasPrefix(key, "SrcK8S_") || strings.HasPrefix(key, "DstK8S_") {
+			delete(*pt, key)
+		}
+	}
 	copyWireK8sFieldsToPlaintext(pt, wire)
 }
 
@@ -392,11 +401,8 @@ func overlayWireTupleToPlaintext(pt *config.GenericMap, wire config.GenericMap) 
 	if !ok {
 		return
 	}
-	dir, _ := (*pt)["Direction"].(string)
-	if dir == "read" {
-		setPlaintextTuple(pt, t.dstIP, t.dstPort, t.srcIP, t.srcPort)
-		return
-	}
+	// The matched packet already travels in the plaintext direction. Reads
+	// arrive at the local process; reversing them would report it as sender.
 	setPlaintextTuple(pt, t.srcIP, t.srcPort, t.dstIP, t.dstPort)
 }
 
@@ -619,6 +625,21 @@ func scorePlaintextWireMatch(pkt *bufferedWirePacket, pt *pendingPlaintext, filt
 	}
 	if !plaintextWirePodCompatible(pkt, pt.data) {
 		return -1
+	}
+	// Direction is relative to the local TLS process, whose endpoint is kept
+	// first while matching. A reverse-direction packet must never win through
+	// timing/payload bonuses or a fallback to capture-filter matching.
+	if podIP, port, ok := plaintextPodEndpoint(pt.data); ok {
+		switch pt.data["Direction"] {
+		case "write":
+			if !wireEgressFrom(pkt.genericMap, podIP, port) {
+				return -1
+			}
+		case "read":
+			if !wireIngressTo(pkt.genericMap, podIP, port) {
+				return -1
+			}
+		}
 	}
 	bonus := timeCorrelationBonus(pkt, pt)
 
