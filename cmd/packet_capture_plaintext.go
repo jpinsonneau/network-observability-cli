@@ -75,3 +75,40 @@ func plaintextAnnotationComment(m config.GenericMap, id uint64) string {
 	}
 	return b.String()
 }
+
+// Only a tuple captured from the socket during the TLS call proves connection
+// identity. Older agents guessed from /proc after descriptors could be reused.
+func plaintextTupleVerified(m config.GenericMap) bool {
+	return m["TupleSource"] == "kernel" && plaintextHasTuple(m)
+}
+
+func prepareUnmatchedPlaintext(m *config.GenericMap) {
+	if !plaintextTupleVerified(*m) {
+		for key := range *m {
+			if key == "SrcAddr" || key == "DstAddr" || key == "SrcPort" || key == "DstPort" ||
+				strings.HasPrefix(key, "SrcK8S_") || strings.HasPrefix(key, "DstK8S_") {
+				delete(*m, key)
+			}
+		}
+		return
+	}
+	if (*m)["Direction"] != "read" {
+		return
+	}
+	// The agent exports local first; JSONL endpoints follow network direction
+	// even when no wire packet could be annotated.
+	original := m.Copy()
+	for key := range original {
+		if strings.HasPrefix(key, "Src") || strings.HasPrefix(key, "Dst") {
+			delete(*m, key)
+		}
+	}
+	for key, value := range original {
+		if strings.HasPrefix(key, "Src") {
+			(*m)["Dst"+key[3:]] = value
+		}
+		if strings.HasPrefix(key, "Dst") {
+			(*m)["Src"+key[3:]] = value
+		}
+	}
+}

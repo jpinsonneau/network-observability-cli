@@ -276,6 +276,10 @@ func (b *wirePacketBuffer) finalizeUnmatchedLocked(pt *pendingPlaintext) {
 	if rec == nil {
 		rec = pt.data
 	}
+	// Preserve network direction for verified events even without an annotation.
+	if rec["TupleSource"] == "kernel" {
+		prepareUnmatchedPlaintext(&rec)
+	}
 	rec["PcapAnnotated"] = false
 	if b.finalizePlaintext != nil {
 		b.finalizePlaintext(rec)

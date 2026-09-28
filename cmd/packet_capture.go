@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -53,6 +54,18 @@ func runPacketCapture(_ *cobra.Command, _ []string) {
 }
 
 func startPacketCollector() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	defer close(done)
+	completed := false
+	// Announce completion only after deferred buffer/file flushes have run.
+	defer func() {
+		if completed {
+			onLimitReached()
+		}
+	}()
+
 	if len(filename) > 0 {
 		log.Infof("Starting Packet Capture for %s...", filename)
 	} else {
@@ -64,7 +77,8 @@ func startPacketCollector() {
 
 	f, err := createOutputFile("pcap", filename+".pcapng")
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err)
+		return
 	}
 	defer f.Close()
 
@@ -90,6 +104,9 @@ func startPacketCollector() {
 	// process exits; without this the last buffered packet(s) are lost and the
 	// pcapng file ends with a truncated block ("unexpected EOF" on read).
 	setActivePacketWriter(ngw, f)
+	ngwMu.Lock()
+	activePacketStop = func() { cancel(); <-done }
+	ngwMu.Unlock()
 	defer clearActivePacketWriter()
 
 	var wireBuf *wirePacketBuffer
@@ -119,35 +136,41 @@ func startPacketCollector() {
 	log.Debug("Started collector")
 	collectorStarted = true
 
-	go func() {
-		<-utils.ExitChannel()
-		close(flowPackets)
-		collector.Close()
-	}()
-
-	for fp := range flowPackets {
-		if stopReceived {
+	defer collector.Close()
+	deadline := time.NewTimer(max(time.Duration(0), maxTime-currentTime().Sub(startupTime)))
+	defer deadline.Stop()
+	exit := utils.ExitChannel()
+	for {
+		var fp *genericmap.Flow
+		select {
+		case <-ctx.Done():
+			completed = true
 			return
+		case <-exit:
+			completed = true
+			return
+		case <-deadline.C:
+			log.Infof("Capture reached %s, exiting now...", maxTime)
+			completed = true
+			return
+		case fp = <-flowPackets:
 		}
-
 		genericMap := config.GenericMap{}
 		if err := json.Unmarshal(fp.GenericMap.Value, &genericMap); err != nil {
 			log.Error("Error while parsing json", err)
-			return
-		}
-
-		if isPlaintextRecord(genericMap) {
-			handlePlaintextRecord(genericMap, wireBuf, plaintextLog)
 			continue
 		}
-
-		handleWirePacket(ngw, genericMap, wireBuf)
-
+		if isPlaintextRecord(genericMap) {
+			handlePlaintextRecord(genericMap, wireBuf, plaintextLog)
+		} else {
+			handleWirePacket(ngw, genericMap, wireBuf)
+		}
 		totalBytes += int64(len(fp.GenericMap.Value))
-		if captureLimitReached() {
+		if totalBytes > maxBytes {
+			log.Infof("Capture reached %s, exiting now...", sizestr.ToString(maxBytes))
+			completed = true
 			return
 		}
-
 		captureStarted = true
 	}
 }
@@ -156,10 +179,11 @@ func handlePlaintextRecord(genericMap config.GenericMap, wireBuf *wirePacketBuff
 	id := assignPlaintextPacketID(&genericMap)
 	enrichPlaintextForExport(&genericMap)
 	go AppendFlow(genericMap.Copy())
-	if wireBuf != nil {
+	if wireBuf != nil && plaintextTupleVerified(genericMap) {
 		wireBuf.HandlePlaintext(genericMap, id)
 		return
 	}
+	prepareUnmatchedPlaintext(&genericMap)
 	genericMap["PcapAnnotated"] = false
 	if plaintextLog != nil {
 		writePlaintextJSONL(plaintextLog, &genericMap)
@@ -180,24 +204,6 @@ func handleWirePacket(ngw *pcapgo.NgWriter, genericMap config.GenericMap, wireBu
 		return
 	}
 	writePacketData(ngw, &genericMap, &data)
-}
-
-// captureLimitReached reports (and logs) whether the byte or time budget is exhausted.
-func captureLimitReached() bool {
-	if totalBytes > maxBytes {
-		if exit := onLimitReached(); exit {
-			log.Infof("Capture reached %s, exiting now...", sizestr.ToString(maxBytes))
-			return true
-		}
-	}
-	now := currentTime()
-	if int(now.Sub(startupTime)) > int(maxTime) {
-		if exit := onLimitReached(); exit {
-			log.Infof("Capture reached %s, exiting now...", maxTime)
-			return true
-		}
-	}
-	return false
 }
 
 func plaintextCaptureEnabled() bool {
@@ -242,8 +248,9 @@ var keylogOffset int64
 // activeNgw / activePcapFile point at the in-flight packet capture output, if
 // any, so flushActivePacketWriter can persist buffered data on abrupt exit.
 var (
-	activeNgw      *pcapgo.NgWriter
-	activePcapFile *os.File
+	activeNgw        *pcapgo.NgWriter
+	activePcapFile   *os.File
+	activePacketStop func()
 )
 
 func setActivePacketWriter(ngw *pcapgo.NgWriter, f *os.File) {
@@ -258,6 +265,19 @@ func clearActivePacketWriter() {
 	defer ngwMu.Unlock()
 	activeNgw = nil
 	activePcapFile = nil
+	activePacketStop = nil
+}
+
+// stopActivePacketCapture waits for pending plaintext, PCAP and file flushes.
+func stopActivePacketCapture() bool {
+	ngwMu.Lock()
+	stop := activePacketStop
+	ngwMu.Unlock()
+	if stop == nil {
+		return false
+	}
+	stop()
+	return true
 }
 
 // flushActivePacketWriter flushes any buffered pcapng data to disk. It is safe
