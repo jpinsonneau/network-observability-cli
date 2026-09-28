@@ -25,10 +25,12 @@ func plaintextTimestamp(m config.GenericMap) time.Time {
 	if t, ok := m["TimeFlowStartMs"].(float64); ok && t > 0 {
 		return time.UnixMilli(int64(t))
 	}
-	if t, ok := m["Time"].(float64); ok {
+	if t, ok := m["Time"].(float64); ok && t > 0 {
 		return time.Unix(int64(t), 0)
 	}
-	return time.Now()
+	// Keep absence distinguishable from an actual event timestamp so receive
+	// time is used only when the capture timestamp is unavailable.
+	return time.Time{}
 }
 
 func plaintextFiveTupleLine(m config.GenericMap) string {

@@ -59,12 +59,13 @@ type pendingPlaintext struct {
 	receivedAt time.Time
 	eventTime  time.Time
 	data       config.GenericMap
-	// original is the pristine record as received, before any speculative
-	// enrichment borrowed from a candidate wire packet. It is exported if the
-	// record expires without a confirmed correlation, so an uncorrelated record
-	// never ships another flow's 5-tuple/peer IP/K8s metadata.
+	// original preserves the agent record before capture-filter hints are added.
+	// Unmatched records are exported without inferred endpoints or metadata.
 	original config.GenericMap
 	id       uint64
+	// Once competing connections are observed, expiry of one candidate must
+	// not make a remaining connection appear uniquely attributable.
+	connectionAmbiguous bool
 }
 
 type wirePacketBuffer struct {
@@ -121,7 +122,7 @@ func (b *wirePacketBuffer) Enqueue(genericMap config.GenericMap, dataB64 string)
 	now := time.Now()
 	pkt := &bufferedWirePacket{
 		receivedAt: now,
-		packetTime: mapTimestamp(genericMap),
+		packetTime: plaintextTimestamp(genericMap),
 		genericMap: genericMap.Copy(),
 		data:       data,
 	}
@@ -133,7 +134,7 @@ func (b *wirePacketBuffer) Enqueue(genericMap config.GenericMap, dataB64 string)
 		writeBufferedWirePacket(b.ngw, b.packets[0])
 		b.packets = b.packets[1:]
 	}
-	b.matchPendingAgainstWireLocked()
+	b.matchPendingAgainstWireLocked(false)
 	return nil
 }
 
@@ -152,8 +153,7 @@ func (b *wirePacketBuffer) HandlePlaintext(m config.GenericMap, id uint64) {
 		id:         id,
 	}
 	pt.original = pt.data.Copy()
-	b.enrichTupleFromWireLocked(pt)
-	if b.tryAnnotateLocked(pt) {
+	if b.tryAnnotateLocked(pt, false) {
 		b.finalizePlaintextLocked(pt)
 		return
 	}
@@ -165,11 +165,23 @@ func (b *wirePacketBuffer) bestWireMatchWithAmbiguityLocked(pt *pendingPlaintext
 	bestIdx := -1
 	bestScore := -1
 	secondBest := -1
+	var connection flowTuple
+	hasConnection, multipleConnections := false, false
 	for i, pkt := range b.packets {
+		score := scorePlaintextWireMatch(pkt, pt, b.filters)
+		// A consumed packet still proves that another connection was present.
+		// Payload/time bonuses distinguish packets, not missing client ports.
+		if score >= 0 {
+			if tuple, ok := flowTupleFromMap(pkt.genericMap); ok {
+				if hasConnection && !tuplesEqual(connection, tuple) && !tuplesReverseEqual(connection, tuple) {
+					multipleConnections = true
+				}
+				connection, hasConnection = tuple, true
+			}
+		}
 		if pkt.annotated {
 			continue
 		}
-		score := scorePlaintextWireMatch(pkt, pt, b.filters)
 		if score > bestScore {
 			secondBest = bestScore
 			bestScore = score
@@ -182,7 +194,10 @@ func (b *wirePacketBuffer) bestWireMatchWithAmbiguityLocked(pt *pendingPlaintext
 	}
 	ambiguous := bestIdx >= 0 && secondBest >= 0 &&
 		bestScore-secondBest <= scoreAmbiguityMargin
-	return bestIdx, bestScore, ambiguous
+	if !plaintextHasTuple(pt.original) && multipleConnections {
+		pt.connectionAmbiguous = true
+	}
+	return bestIdx, bestScore, ambiguous || pt.connectionAmbiguous
 }
 
 func minAnnotationScore(m config.GenericMap, filters captureFilters) int {
@@ -209,24 +224,10 @@ func (b *wirePacketBuffer) preparePlaintextForMatchLocked(pt *pendingPlaintext) 
 	enrichPlaintextFromCaptureFilters(&pt.data, b.filters)
 }
 
-func (b *wirePacketBuffer) enrichTupleFromWireLocked(pt *pendingPlaintext) {
-	if plaintextHasTuple(pt.data) {
-		return
-	}
-	bestIdx, bestScore, ambiguous := b.bestWireMatchWithAmbiguityLocked(pt)
-	if bestIdx < 0 || ambiguous || bestScore < scoreLooseMatchBase {
-		return
-	}
-	applyWireTupleToPlaintext(&pt.data, b.packets[bestIdx].genericMap)
-	copyWireK8sFieldsToPlaintext(&pt.data, b.packets[bestIdx].genericMap)
-	enrichPlaintextForExport(&pt.data)
-}
-
-func (b *wirePacketBuffer) matchPendingAgainstWireLocked() {
+func (b *wirePacketBuffer) matchPendingAgainstWireLocked(final bool) {
 	remaining := b.pendingPlaintext[:0]
 	for _, pt := range b.pendingPlaintext {
-		b.enrichTupleFromWireLocked(pt)
-		if b.tryAnnotateLocked(pt) {
+		if b.tryAnnotateLocked(pt, final) {
 			b.finalizePlaintextLocked(pt)
 			continue
 		}
@@ -235,7 +236,7 @@ func (b *wirePacketBuffer) matchPendingAgainstWireLocked() {
 	b.pendingPlaintext = remaining
 }
 
-func (b *wirePacketBuffer) tryAnnotateLocked(pt *pendingPlaintext) bool {
+func (b *wirePacketBuffer) tryAnnotateLocked(pt *pendingPlaintext, final bool) bool {
 	bestIdx, bestScore, ambiguous := b.bestWireMatchWithAmbiguityLocked(pt)
 	if bestIdx < 0 || ambiguous || bestScore < minAnnotationScore(pt.data, b.filters) {
 		return false
@@ -243,6 +244,12 @@ func (b *wirePacketBuffer) tryAnnotateLocked(pt *pendingPlaintext) bool {
 
 	pkt := b.packets[bestIdx]
 	if pkt.annotated {
+		return false
+	}
+	// With a missing endpoint, the first arriving packet is not proof of a
+	// unique connection. Wait for the export window before inferring a tuple.
+	if !final && !plaintextHasTuple(pt.original) &&
+		time.Since(pt.receivedAt) < b.window && time.Since(pkt.receivedAt) < b.window {
 		return false
 	}
 	overlayCorrelatedWireToPlaintext(&pt.data, pkt.genericMap)
@@ -278,7 +285,7 @@ func (b *wirePacketBuffer) finalizeUnmatchedLocked(pt *pendingPlaintext) {
 func (b *wirePacketBuffer) flushAll() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.matchPendingAgainstWireLocked()
+	b.matchPendingAgainstWireLocked(true)
 	for _, pkt := range b.packets {
 		writeBufferedWirePacket(b.ngw, pkt)
 	}
@@ -291,7 +298,7 @@ func (b *wirePacketBuffer) flushAll() {
 
 func (b *wirePacketBuffer) flushExpiredLocked(now time.Time) {
 	if len(b.packets) > 0 {
-		b.matchPendingAgainstWireLocked()
+		b.matchPendingAgainstWireLocked(false)
 		remaining := b.packets[:0]
 		for _, pkt := range b.packets {
 			if now.Sub(pkt.receivedAt) >= b.window {
@@ -353,25 +360,6 @@ func setPlaintextTuple(m *config.GenericMap, srcIP string, srcPort uint16, dstIP
 	(*m)["SrcPort"] = srcPort
 	(*m)["DstPort"] = dstPort
 	(*m)["Proto"] = float64(6)
-}
-
-// applyWireTupleToPlaintext borrows a candidate tuple for matching, keeping the
-// local process endpoint in SrcAddr/SrcPort as in the incoming agent record.
-// Export uses overlayWireTupleToPlaintext to restore wire direction.
-func applyWireTupleToPlaintext(pt *config.GenericMap, wire config.GenericMap) {
-	if pt == nil || plaintextHasTuple(*pt) {
-		return
-	}
-	t, ok := flowTupleFromMap(wire)
-	if !ok {
-		return
-	}
-	dir, _ := (*pt)["Direction"].(string)
-	if dir == "read" {
-		setPlaintextTuple(pt, t.dstIP, t.dstPort, t.srcIP, t.srcPort)
-		return
-	}
-	setPlaintextTuple(pt, t.srcIP, t.srcPort, t.dstIP, t.dstPort)
 }
 
 // overlayCorrelatedWireToPlaintext applies the wire 5-tuple and FLP Kubernetes fields
@@ -592,9 +580,9 @@ func receiveTimeDelta(pkt *bufferedWirePacket, pt *pendingPlaintext) time.Durati
 }
 
 func timesCorrelated(pkt *bufferedWirePacket, pt *pendingPlaintext) bool {
-	agentDelta := pt.eventTime.Sub(pkt.packetTime)
-	if agentDelta >= plaintextMatchMinDelta && agentDelta <= plaintextMatchMaxSkew {
-		return true
+	if !pkt.packetTime.IsZero() && !pt.eventTime.IsZero() {
+		agentDelta := pt.eventTime.Sub(pkt.packetTime)
+		return agentDelta >= plaintextMatchMinDelta && agentDelta <= plaintextMatchMaxSkew
 	}
 	return receiveTimeDelta(pkt, pt) <= plaintextCorrelationWindow
 }
@@ -603,10 +591,17 @@ func timesCorrelated(pkt *bufferedWirePacket, pt *pendingPlaintext) bool {
 // closer in time scores higher, but the bonus stays a tiebreaker rather than
 // overriding the match-quality tier (see scoreTimeBonusMax).
 func timeCorrelationBonus(pkt *bufferedWirePacket, pt *pendingPlaintext) int {
-	agentDelta := pt.eventTime.Sub(pkt.packetTime)
-	if agentDelta >= plaintextMatchMinDelta && agentDelta <= plaintextMatchMaxSkew {
-		span := (plaintextMatchMaxSkew - plaintextMatchMinDelta).Milliseconds()
-		return int(scoreTimeBonusMax * (plaintextMatchMaxSkew - agentDelta).Milliseconds() / span)
+	if !pkt.packetTime.IsZero() && !pt.eventTime.IsZero() {
+		delta := pt.eventTime.Sub(pkt.packetTime)
+		limit := plaintextMatchMaxSkew
+		if delta < 0 {
+			delta = -delta
+			limit = -plaintextMatchMinDelta
+		}
+		if delta <= limit {
+			return int(scoreTimeBonusMax * (limit - delta).Milliseconds() / limit.Milliseconds())
+		}
+		return 0
 	}
 	recvDelta := receiveTimeDelta(pkt, pt)
 	if recvDelta <= plaintextCorrelationWindow {
@@ -617,13 +612,13 @@ func timeCorrelationBonus(pkt *bufferedWirePacket, pt *pendingPlaintext) int {
 }
 
 func scorePlaintextWireMatch(pkt *bufferedWirePacket, pt *pendingPlaintext, filters captureFilters) int {
-	if pkt != nil && pkt.annotated {
-		return -1
-	}
 	if !timesCorrelated(pkt, pt) {
 		return -1
 	}
 	if !plaintextWirePodCompatible(pkt, pt.data) {
+		return -1
+	}
+	if !plaintextEndpointsCompatible(pkt.genericMap, pt.data) {
 		return -1
 	}
 	// Direction is relative to the local TLS process, whose endpoint is kept
@@ -645,11 +640,10 @@ func scorePlaintextWireMatch(pkt *bufferedWirePacket, pt *pendingPlaintext, filt
 
 	base := -1
 	if plaintextHasTuple(pt.data) {
-		if s := scoreStrictTupleMatch(pkt, pt.data); s >= 0 {
-			base = s
-		} else if s := scoreRemoteEndpointMatch(pkt, pt.data); s >= 0 {
-			base = s
-		}
+		// A supplied client port is a constraint, not a preference. Falling
+		// back to a peer-IP match lets payload bonuses pass the strict threshold
+		// and silently rewrites the record onto a different TCP connection.
+		base = scoreStrictTupleMatch(pkt, pt.data)
 	} else {
 		if s := scoreStrictTupleMatch(pkt, pt.data); s >= 0 {
 			base = s
@@ -665,6 +659,36 @@ func scorePlaintextWireMatch(pkt *bufferedWirePacket, pt *pendingPlaintext, filt
 		return -1
 	}
 	return applyWirePayloadScoreAdjustments(pkt, pt, base+bonus)
+}
+
+// Partial tuples may be completed, but known addresses and their ports must
+// never be replaced by a looser endpoint or capture-filter match.
+func plaintextEndpointsCompatible(wire, pt config.GenericMap) bool {
+	for _, prefix := range []string{"Src", "Dst"} {
+		ip, known := validIPString(pt[prefix+"Addr"])
+		if !known {
+			continue
+		}
+		wirePrefix := prefix
+		if pt["Direction"] == "read" {
+			if prefix == "Src" {
+				wirePrefix = "Dst"
+			} else {
+				wirePrefix = "Src"
+			}
+		}
+		wireIP, _ := validIPString(wire[wirePrefix+"Addr"])
+		if wireIP != ip {
+			return false
+		}
+		if port, ok := mapPortFromGeneric(pt, prefix+"Port"); ok && port > 0 {
+			wirePort, ok := mapPortFromGeneric(wire, wirePrefix+"Port")
+			if !ok || wirePort != port {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func applyWirePayloadScoreAdjustments(pkt *bufferedWirePacket, pt *pendingPlaintext, score int) int {

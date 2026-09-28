@@ -72,13 +72,13 @@ func enrichPlaintextFromCaptureFilters(m *config.GenericMap, f captureFilters) {
 		return
 	}
 	if port > 0 {
-		dir, _ := (*m)["Direction"].(string)
-		(*m)["Proto"] = float64(6)
-		if dir == "read" {
-			(*m)["DstPort"] = port
-		} else {
-			(*m)["SrcPort"] = port
+		// The agent keeps the local endpoint first, including read events.
+		// A capture port must not replace an already known local port.
+		if p, ok := mapPortFromGeneric(*m, "SrcPort"); ok && p > 0 {
+			return
 		}
+		(*m)["Proto"] = float64(6)
+		(*m)["SrcPort"] = port
 	}
 }
 
@@ -100,9 +100,12 @@ func applyWorkloadPlaintextTuple(m *config.GenericMap, peer net.IP, port uint16)
 	if m == nil || peer == nil {
 		return
 	}
+	if src, ok := validIPString((*m)["SrcAddr"]); ok && src != peer.String() {
+		return
+	}
 	(*m)["Proto"] = float64(6)
 	(*m)["SrcAddr"] = peer.String()
-	if port > 0 {
+	if p, ok := mapPortFromGeneric(*m, "SrcPort"); port > 0 && (!ok || p == 0) {
 		(*m)["SrcPort"] = port
 	}
 }

@@ -76,6 +76,7 @@ func TestWirePacketBufferPlaintextDirection(t *testing.T) {
 					if !plaintextFirst {
 						buf.HandlePlaintext(pt, 6)
 					}
+					buf.flushAll()
 					if !assert.Len(t, finalized, 1) {
 						t.FailNow()
 					}
@@ -313,10 +314,10 @@ func TestWirePacketBufferLooseMatchOnWireArrival(t *testing.T) {
 	if err := wireBuf.Enqueue(wireMap, "Zm9v"); err != nil {
 		t.Fatal(err)
 	}
+	wireBuf.Close()
 	if len(finalized) != 1 || finalized[0]["PcapAnnotated"] != true {
 		t.Fatalf("expected remote/loose match, got %#v", finalized)
 	}
-	wireBuf.Close()
 }
 
 func TestScoreUsesSymmetricReceiveTimeFallback(t *testing.T) {
@@ -405,13 +406,13 @@ func TestWirePacketBufferPortOnlyFilterMatch(t *testing.T) {
 	if err := wireBuf.Enqueue(wireMap, "Zm9v"); err != nil {
 		t.Fatal(err)
 	}
+	wireBuf.Close()
 	if len(finalized) != 1 || finalized[0]["PcapAnnotated"] != true {
 		t.Fatalf("expected port-only filter match, got %#v", finalized)
 	}
 	if finalized[0]["DstAddr"] != "10.244.2.2" {
 		t.Fatalf("expected wire tuple enrichment, got %#v", finalized[0])
 	}
-	wireBuf.Close()
 }
 
 func TestWirePacketBufferPeerIPOnlyFilterMatch(t *testing.T) {
@@ -427,7 +428,7 @@ func TestWirePacketBufferPeerIPOnlyFilterMatch(t *testing.T) {
 	pt := config.GenericMap{
 		"RecordType":      "plaintext",
 		"TimeFlowStartMs": float64(wireTime.UnixMilli()),
-		"Direction":       "write",
+		"Direction":       "read",
 		"TLSSource":       "openssl",
 	}
 	wireBuf.HandlePlaintext(pt, 4)
@@ -440,10 +441,10 @@ func TestWirePacketBufferPeerIPOnlyFilterMatch(t *testing.T) {
 	if err := wireBuf.Enqueue(wireMap, "Zm9v"); err != nil {
 		t.Fatal(err)
 	}
+	wireBuf.Close()
 	if len(finalized) != 1 || finalized[0]["PcapAnnotated"] != true {
 		t.Fatalf("expected peer-ip-only filter match, got %#v", finalized)
 	}
-	wireBuf.Close()
 }
 
 func TestWirePacketBufferPortOnlyAmbiguousNoMatch(t *testing.T) {
@@ -484,30 +485,6 @@ func TestWirePacketBufferPortOnlyAmbiguousNoMatch(t *testing.T) {
 	wireBuf.Close()
 	if len(finalized) != 1 || finalized[0]["PcapAnnotated"] == true {
 		t.Fatalf("expected ambiguous port-only match to skip annotation, got %#v", finalized)
-	}
-}
-
-func TestApplyWireTupleToPlaintext(t *testing.T) {
-	wire := config.GenericMap{
-		"SrcAddr": "10.244.2.11", "DstAddr": "10.244.1.9",
-		"SrcPort": float64(8443), "DstPort": float64(51234),
-	}
-	pt := config.GenericMap{"Direction": "write"}
-	applyWireTupleToPlaintext(&pt, wire)
-	if pt["SrcAddr"] != "10.244.2.11" || pt["DstAddr"] != "10.244.1.9" {
-		t.Fatalf("unexpected write tuple: %#v", pt)
-	}
-	if pt["SrcPort"] != uint16(8443) || pt["DstPort"] != uint16(51234) {
-		t.Fatalf("unexpected write ports: %#v", pt)
-	}
-
-	ptRead := config.GenericMap{"Direction": "read"}
-	applyWireTupleToPlaintext(&ptRead, config.GenericMap{
-		"SrcAddr": "10.244.1.9", "DstAddr": "10.244.2.11",
-		"SrcPort": float64(51234), "DstPort": float64(8443),
-	})
-	if ptRead["SrcAddr"] != "10.244.2.11" || ptRead["DstAddr"] != "10.244.1.9" {
-		t.Fatalf("unexpected read tuple: %#v", ptRead)
 	}
 }
 
@@ -755,11 +732,8 @@ func TestWirePacketBufferCopiesK8sFromCorrelatedWire(t *testing.T) {
 	}
 }
 
-// TestWirePacketBufferUnmatchedDropsBorrowedWireFields verifies that a plaintext
-// record which speculatively borrows fields from a candidate wire packet but is
-// never actually correlated is exported in its pristine form (no borrowed K8s
-// metadata, original peer preserved) with PcapAnnotated=false.
-func TestWirePacketBufferUnmatchedDropsBorrowedWireFields(t *testing.T) {
+// Unmatched records retain the agent's fields without candidate wire metadata.
+func TestWirePacketBufferUnmatchedPreservesAgentFields(t *testing.T) {
 	finalized := make([]config.GenericMap, 0)
 	var pcapBuf bytes.Buffer
 	ngw, _ := pcapgo.NewNgWriter(&pcapBuf, layers.LinkTypeEthernet)
