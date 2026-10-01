@@ -656,8 +656,8 @@ func packetCaptureFlowSnapshot() []config.GenericMap {
 
 func AppendFlow(genericMap config.GenericMap) {
 	mutex.Lock()
+	defer mutex.Unlock()
 	if paused {
-		mutex.Unlock()
 		return
 	}
 
@@ -674,7 +674,6 @@ func AppendFlow(genericMap config.GenericMap) {
 		default:
 			appendToTimeSortedBuffer(&lastFlows, genericMap, keepCount)
 		}
-		mutex.Unlock()
 		return
 	}
 
@@ -696,7 +695,6 @@ func AppendFlow(genericMap config.GenericMap) {
 		lastFlows = lastFlows[len(lastFlows)-keepCount:]
 	}
 
-	mutex.Unlock()
 }
 
 func updateDisplayEnrichmentTexts() {
