@@ -50,6 +50,9 @@ func runPacketCapture(_ *cobra.Command, _ []string) {
 	} else {
 		go startPacketCollector()
 		createFlowDisplay()
+		// Interactive UI exit is a normal return path, so stop the collector
+		// explicitly and wait for its pending plaintext/PCAP buffers to flush.
+		stopActivePacketCapture()
 	}
 }
 
